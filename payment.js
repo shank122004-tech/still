@@ -20,8 +20,8 @@
   const CF_ENV = 'production';
 
   // Always use the new Cloud Run URLs — they have CORS open for all origins
-  const ORDER_URL  = 'https://createcashfreeorder-419137308157.us-central1.run.app';
-  const VERIFY_URL = 'https://verifypayment-419137308157.us-central1.run.app';
+  const ORDER_URL  = 'https://createcashfreeorder-56khnynjia-uc.a.run.app';
+  const VERIFY_URL = 'https://verifypayment-56khnynjia-uc.a.run.app';
 
   const PLANS = {
     premium:          { id: 'premium',          name: 'Premium',                price: 199,  emoji: '⭐' },
