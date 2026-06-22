@@ -24,7 +24,7 @@ const QuestionService = (function () {
   async function loadAllQuestionsFromFolder(folderPath) { const cacheKey = `folder_${folderPath.replace(/\//g, '_')}`; const cached = cache.get(cacheKey); if (cached) return cached; try { const jsonFiles = await listAllJsonFiles(folderPath); if (!jsonFiles.length) return []; const filesData = await Promise.all(jsonFiles.map(loadJsonFile)); const allQuestions = []; const seenIds = new Set(); for (const fileData of filesData) { if (!fileData) continue; const questions = Array.isArray(fileData) ? fileData : [fileData]; for (const q of questions) { const normalized = normalizeQuestion(q); if (normalized && !seenIds.has(normalized.id)) { allQuestions.push(normalized); seenIds.add(normalized.id); } } } cache.set(cacheKey, allQuestions); return allQuestions; } catch (e) { return []; } }
   function shuffle(array) { const arr = [...array]; for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
   function filterQuestions(questions, criteria) { if (!criteria) return questions; return questions.filter(q => { if (criteria.subject && q.subject && q.subject !== criteria.subject) return false; if (criteria.year && q.year && q.year !== criteria.year) return false; return true; }); }
-  return { async loadExamQuestions(exam, type = 'pyq', options = {}) { const { count = null, shuffle: shouldShuffle = true, criteria = null } = options; const folder = `${type}/${exam}`; let questions = await loadAllQuestionsFromFolder(folder); if (!questions.length) return { items: [], total: 0 }; if (criteria) questions = filterQuestions(questions, criteria); if (shouldShuffle) questions = shuffle(questions); if (count && count > 0) questions = questions.slice(0, count); return { items: questions, total: questions.length }; }, async loadMockTest(exam, count = 20, options = {}) { const result = await this.loadExamQuestions(exam, 'mock', { count, shuffle: true, criteria: options.criteria }); return result.items || []; }, async loadBattleQuestions(exam, count = 10, options = {}) { const result = await this.loadExamQuestions(exam, 'battle', { count, shuffle: true }); return (result.items || []).map(q => ({ ...q, explanation: '' })); }, async loadPYQQuestions(exam, year = null, count = 20, options = {}) { const result = await this.loadExamQuestions(exam, 'pyq', { count, shuffle: true, criteria: { ...options.criteria, year } }); return result.items || []; }, async getAvailableYears(exam) { const cacheKey = `years_${exam}`; const cached = cache.get(cacheKey); if (cached) return cached; try { const questions = await loadAllQuestionsFromFolder(`pyq/${exam}`); const years = new Set(); questions.forEach(q => { if (q.year) years.add(q.year); }); const result = Array.from(years).sort((a, b) => b - a); cache.set(cacheKey, result); return result; } catch (e) { return []; } }, async storeBattleQuestions(battleId, questions) { if (!window.db || !window._setDoc) return; try { const ref = window._doc(window.db, 'battles', battleId); await window._setDoc(ref, { questions: questions.map(q => ({ id: q.id, question: q.question, options: q.options, answerIndex: q.answerIndex })), questionsStoredAt: new Date() }, { merge: true }); } catch (e) {} }, clearCache(key = null) { if (key) cache.clear(key); else { cache.memory = {}; Object.keys(sessionStorage).forEach(k => { if (k.startsWith('qs_')) sessionStorage.removeItem(k); }); } }, getCacheStats() { return { memory: Object.keys(cache.memory).length, session: Object.keys(sessionStorage).filter(k => k.startsWith('qs_')).length }; }, normalizeQuestion, shuffle };
+  return { async loadExamQuestions(exam, type = 'pyq', options = {}) { const { count = null, shuffle: shouldShuffle = true, criteria = null } = options; const folder = `${type}/${exam}`; let questions = await loadAllQuestionsFromFolder(folder); if (!questions.length) return { items: [], total: 0 }; if (criteria) questions = filterQuestions(questions, criteria); if (shouldShuffle) questions = shuffle(questions); if (count && count > 0) questions = questions.slice(0, count); return { items: questions, total: questions.length }; }, async loadMockTest(exam, count = 20, options = {}) { const result = await this.loadExamQuestions(exam, 'mock', { count, shuffle: true, criteria: options.criteria }); return result.items || []; }, async loadBattleQuestions(exam, count = 10, options = {}) { const result = await this.loadExamQuestions(exam, 'mock', { count, shuffle: true }); return (result.items || []).map(q => ({ ...q, explanation: '' })); }, async loadPYQQuestions(exam, year = null, count = 20, options = {}) { const result = await this.loadExamQuestions(exam, 'pyq', { count, shuffle: true, criteria: { ...options.criteria, year } }); return result.items || []; }, async getAvailableYears(exam) { const cacheKey = `years_${exam}`; const cached = cache.get(cacheKey); if (cached) return cached; try { const questions = await loadAllQuestionsFromFolder(`pyq/${exam}`); const years = new Set(); questions.forEach(q => { if (q.year) years.add(q.year); }); const result = Array.from(years).sort((a, b) => b - a); cache.set(cacheKey, result); return result; } catch (e) { return []; } }, async storeBattleQuestions(battleId, questions) { if (!window.db || !window._setDoc) return; try { const ref = window._doc(window.db, 'battles', battleId); await window._setDoc(ref, { questions: questions.map(q => ({ id: q.id, question: q.question, options: q.options, answerIndex: q.answerIndex })), questionsStoredAt: new Date() }, { merge: true }); } catch (e) {} }, clearCache(key = null) { if (key) cache.clear(key); else { cache.memory = {}; Object.keys(sessionStorage).forEach(k => { if (k.startsWith('qs_')) sessionStorage.removeItem(k); }); } }, getCacheStats() { return { memory: Object.keys(cache.memory).length, session: Object.keys(sessionStorage).filter(k => k.startsWith('qs_')).length }; }, normalizeQuestion, shuffle };
 })();
 
 (function (global) {
@@ -225,29 +225,7 @@ const QuestionService = (function () {
     class12_com: { label:'Class 12 Commerce', color:'#22c55e', subjects:['Accountancy','Business Studies','Economics','English','Maths'], type:'class' },
     class12_arts: { label:'Class 12 Arts', color:'#86efac', subjects:['History','Geography','Political Science','Economics','English'], type:'class' },
     class12: { label:'Class 12',    color:'#4ade80', subjects:['Physics','Chemistry','Maths','Biology','English','Economics','Accountancy'], type:'class' },
-    // B.Tech / Engineering
-    btech_cs: { label:'B.Tech CS',   color:'#6C63FF', subjects:['DSA','DBMS','OS','CN','OOP','Algorithms'], type:'college' },
-    btech_ai: { label:'B.Tech AI/ML',color:'#a78bfa', subjects:['ML','Deep Learning','Python','Statistics','NLP'], type:'college' },
-    btech_ds: { label:'B.Tech Data Science',color:'#38bdf8', subjects:['Statistics','ML','Python','SQL','Data Viz'], type:'college' },
-    btech_it: { label:'B.Tech IT',   color:'#818cf8', subjects:['Networks','Security','Web Dev','DBMS','OS'], type:'college' },
-    btech_ec: { label:'B.Tech ECE',  color:'#34d399', subjects:['Electronics','Signals','VLSI','Communication','Analog'], type:'college' },
-    btech_ee: { label:'B.Tech EE',   color:'#fbbf24', subjects:['Power Systems','Machines','Control','Circuits','Electromagnetics'], type:'college' },
-    btech_me: { label:'B.Tech Mech', color:'#fb923c', subjects:['Thermodynamics','Mechanics','Manufacturing','Fluids','Materials'], type:'college' },
-    btech_ce: { label:'B.Tech Civil',color:'#f59e0b', subjects:['Structures','Concrete','Geotechnical','Surveying','Fluids'], type:'college' },
-    // B.Sc / Science
-    bsc_cs:  { label:'B.Sc CS',      color:'#06b6d4', subjects:['Programming','DBMS','OS','Algorithms','Web'], type:'college' },
-    bsc_maths: { label:'B.Sc Maths', color:'#8b5cf6', subjects:['Calculus','Algebra','Analysis','Statistics','Geometry'], type:'college' },
-    bsc_physics: { label:'B.Sc Physics', color:'#60a5fa', subjects:['Mechanics','Electromagnetism','Optics','Quantum','Thermodynamics'], type:'college' },
-    // BCA / MCA / B.Com
-    bca:     { label:'BCA',          color:'#c084fc', subjects:['Programming','Web Dev','DBMS','Networks','Maths'], type:'college' },
-    mca:     { label:'MCA',          color:'#f472b6', subjects:['Advanced Programming','AI','DBMS','Software Engg','Algorithms'], type:'college' },
-    bcom:    { label:'B.Com',        color:'#fbbf24', subjects:['Accountancy','Economics','Business Law','Finance','Tax'], type:'college' },
-    bba:     { label:'BBA',          color:'#fb7185', subjects:['Management','Marketing','Finance','HR','Accounting'], type:'college' },
-    // Diploma / Polytechnic
-    diploma_cs:    { label:'Diploma CS',    color:'#4ade80', subjects:['Programming','Web Dev','DBMS','Networking','OS'], type:'diploma' },
-    diploma_ec:    { label:'Diploma Electronics', color:'#34d399', subjects:['Electronics','Digital','Microcontrollers','PCB','Communication'], type:'diploma' },
-    diploma_me:    { label:'Diploma Mechanical', color:'#fb923c', subjects:['Workshop','Thermodynamics','Manufacturing','Metrology','Fluids'], type:'diploma' },
-    diploma_civil: { label:'Diploma Civil', color:'#f59e0b', subjects:['Drawing','Concrete','Surveying','Construction','Materials'], type:'diploma' },
+
   };
 
   /* ─────────────────────────────────────────────────────────────
@@ -317,9 +295,7 @@ const QuestionService = (function () {
     if (cached && Array.isArray(cached) && cached.length >= count) return cached;
     const conf = EXAM_CONFIGS[exam];
     let context;
-    if (conf && (conf.type === 'college' || conf.type === 'diploma')) {
-      context = conf.label + ' semester exam';
-    } else if (conf && conf.type === 'class') {
+    if (conf && conf.type === 'class') {
       context = conf.label + ' NCERT board exam';
     } else {
       context = (conf ? conf.label : exam) + ' ' + year;
@@ -380,7 +356,6 @@ const QuestionService = (function () {
     const paths = [
       type + '/' + exam + '/questions.json',
       'mock/' + exam + '/questions.json',
-      'battles/' + exam + '/questions.json',
     ];
     for (const path of paths) {
       try {
@@ -868,11 +843,6 @@ async function _generateQuizQuestions(exam, count, type) {
       const picked = _seenTracker.pick(exam, trackType, pool, count);
       if (picked.length) return picked;
     }
-    // Fallback to battle questions
-    const pool2 = await _loadFullPool(exam, 'battles');
-    if (pool2 && pool2.length) {
-      return _seenTracker.pick(exam, trackType + '_battle', pool2, count);
-    }
     return [];
   } catch(e) { return []; }
 }
@@ -997,12 +967,11 @@ async function _generateQuizQuestions(exam, count, type) {
     _renderPYQHome() {
       const body = document.getElementById('cf-pyq-modal_body');
       if (!body) return;
-      // Include all study modes: exams, classes, college, diploma
-      const exams = Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='exam'||v.type==='class'||v.type==='college'||v.type==='diploma');
+      // Include all study modes: exams, classes
+      const exams = Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='exam'||v.type==='class');
       const sscExams = exams.filter(([k,v])=>['cgl','chsl','gd','mts','cpo'].includes(k));
       const compExams = exams.filter(([k,v])=>v.type==='exam'&&!['cgl','chsl','gd','mts','cpo'].includes(k));
       const classExams = exams.filter(([k,v])=>v.type==='class');
-      const collegeExams = exams.filter(([k,v])=>v.type==='college'||v.type==='diploma');
       function chipGroup(label, arr) {
         if (!arr.length) return '';
         return `<div class="cf-section-label" style="margin-top:14px">${label}</div><div class="cf-exam-grid">${arr.map(([k,v])=>`<button class="cf-exam-chip" style="--ec:${v.color}" onclick="CF._renderPYQYears('${k}')">${v.label}</button>`).join('')}</div>`;
@@ -1012,7 +981,6 @@ async function _generateQuizQuestions(exam, count, type) {
         ${chipGroup('⚔️ SSC Exams', sscExams)}
         ${chipGroup('📋 Competitive Exams', compExams)}
         ${chipGroup('📖 Class 1–12', classExams)}
-        ${chipGroup('🎓 College / Diploma', collegeExams)}
         <div id="cf-pyq-years" style="margin-top:18px"></div>
         <div id="cf-pyq-questions" style="margin-top:12px"></div>`;
     },
@@ -1106,8 +1074,8 @@ async function _generateQuizQuestions(exam, count, type) {
       const body = document.getElementById('cf-mock-modal_body');
       if (!body) return;
       if (!MockTest._state) {
-        // Include all study modes: exams, classes, college, diploma
-      const exams = Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='exam'||v.type==='class'||v.type==='college'||v.type==='diploma');
+        // Include all study modes: exams, classes
+      const exams = Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='exam'||v.type==='class');
         body.innerHTML = `
           <div class="cf-center-text">
             <div style="font-size:48px;margin-bottom:12px">🎯</div>
@@ -1121,7 +1089,7 @@ async function _generateQuizQuestions(exam, count, type) {
               <div class="cf-section-label" style="margin-top:12px">📖 Class 1–12</div>
               <div class="cf-exam-grid">${Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='class').map(([k,v])=>`<button class="cf-exam-chip" style="--ec:${v.color}" onclick="MockTest.start('${k}',40)">${v.label}</button>`).join('')}</div>
               <div class="cf-section-label" style="margin-top:12px">🎓 College / B.Tech / Diploma</div>
-              <div class="cf-exam-grid">${Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='college'||v.type==='diploma').map(([k,v])=>`<button class="cf-exam-chip" style="--ec:${v.color}" onclick="MockTest.start('${k}',40)">${v.label}</button>`).join('')}</div>
+
             </div>
             <p class="cf-muted" style="font-size:12px">Duration: 48 min • 40 Questions • +2/−0.5 marking</p>
           </div>`;
@@ -1297,8 +1265,8 @@ async function _generateQuizQuestions(exam, count, type) {
     _renderExamExpansion() {
       const body = document.getElementById('cf-exam-modal_body');
       if (!body) return;
-      // Include all study modes: exams, classes, college, diploma
-      const exams = Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='exam'||v.type==='class'||v.type==='college'||v.type==='diploma');
+      // Include all study modes: exams, classes
+      const exams = Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='exam'||v.type==='class');
       const classes = Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='class');
       body.innerHTML = `
         <div class="cf-section-label">🏛️ Competitive Exams</div>
@@ -2279,8 +2247,8 @@ async function _generateQuizQuestions(exam, count, type) {
     _renderScorePredictor() {
       const body = document.getElementById('cf-score-modal_body');
       if (!body) return;
-      // Include all study modes: exams, classes, college, diploma
-      const exams = Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='exam'||v.type==='class'||v.type==='college'||v.type==='diploma');
+      // Include all study modes: exams, classes
+      const exams = Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='exam'||v.type==='class');
       body.innerHTML = `
         <p class="cf-muted" style="margin-bottom:16px">Enter your expected scores to predict rank and cutoff status</p>
         <div class="cf-form-card">
@@ -2294,9 +2262,7 @@ async function _generateQuizQuestions(exam, count, type) {
             <optgroup label="── Class 1–12 ──">
               ${Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='class').map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
             </optgroup>
-            <optgroup label="── College / B.Tech / Diploma ──">
-              ${Object.entries(EXAM_CONFIGS).filter(([k,v])=>v.type==='college'||v.type==='diploma').map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
-            </optgroup>
+
           </select>
           <div style="display:flex;gap:8px">
             <input class="cf-input" id="sp-score" type="number" placeholder="Your score (e.g. 155)" min="0" max="400" style="flex:1"/>
