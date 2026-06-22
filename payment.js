@@ -25,7 +25,7 @@
 
   const PLANS = {
     premium:          { id: 'premium',          name: 'Premium',                price: 199,  emoji: '⭐' },
-    ssc:              { id: 'ssc',              name: 'SSC Pro',                 price: 199,  emoji: '🎯' },
+    ssc:              { id: 'ssc',              name: 'SSC Pro',                 price: 1,  emoji: '🎯' },
     class10:          { id: 'class10',          name: 'Class Pro',               price: 129,  emoji: '📖' },
     class10_yearly:   { id: 'class10_yearly',   name: 'Class Pro Yearly',        price: 1299, emoji: '📖' },
     semiannual:       { id: 'semiannual',        name: 'SSC 6-Month Plan',        price: 499,  emoji: '🔥' },
@@ -663,7 +663,7 @@
         <div class="upg-card-name">SSC Pro</div>
         <div class="upg-card-tagline">Crack SSC with AI power</div>
         <div class="upg-price-row">
-          <span class="upg-price">₹199</span>
+          <span class="upg-price">₹1</span>
           <span class="upg-price-per">INR / month (incl. GST)</span>
         </div>
         <button onclick="handlePayment('ssc')" class="upg-btn ${(isPrem && curPlan==='ssc') ? 'upg-btn-active' : 'upg-btn-primary'}">
