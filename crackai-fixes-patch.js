@@ -321,57 +321,6 @@
         50% { opacity: 0.5; transform: scale(0.7); }
       }
 
-      /* ── Daily Goal Bar (keep but upgrade) ── */
-      #cf-daily-bar {
-        display: flex !important;
-        align-items: center;
-        gap: 10px;
-        padding: 10px 12px !important;
-        margin: 0 0 8px !important;
-        border-radius: 12px !important;
-        background: linear-gradient(135deg, rgba(108,99,255,0.12), rgba(255,107,157,0.08)) !important;
-        border: 1px solid rgba(108,99,255,0.2) !important;
-        cursor: pointer;
-        transition: all 0.2s ease !important;
-        position: relative;
-        overflow: hidden;
-      }
-      #cf-daily-bar::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(135deg, rgba(108,99,255,0.06), transparent);
-        opacity: 0;
-        transition: opacity 0.2s;
-      }
-      #cf-daily-bar:hover::before { opacity: 1; }
-      #cf-daily-bar:hover {
-        border-color: rgba(108,99,255,0.4) !important;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 16px rgba(108,99,255,0.15) !important;
-      }
-      #cf-goal-bar-track {
-        flex: 1;
-        height: 5px !important;
-        background: rgba(255,255,255,0.07) !important;
-        border-radius: 3px !important;
-        overflow: hidden;
-      }
-      #cf-goal-bar {
-        height: 100% !important;
-        background: linear-gradient(90deg, #6C63FF, #FF6B9D) !important;
-        border-radius: 3px !important;
-        box-shadow: 0 0 8px rgba(108,99,255,0.4);
-        transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
-      }
-      #cf-daily-badge {
-        font-size: 10px !important;
-        font-weight: 800 !important;
-        color: #6C63FF !important;
-        white-space: nowrap;
-        font-variant-numeric: tabular-nums;
-      }
-
       /* ── Tools Grid ── */
       .cf-tools-grid {
         display: grid;
@@ -601,22 +550,6 @@
 
     const tools = [
       {
-        id: 'pyq',
-        icon: '📚',
-        label: 'PYQ Bank',
-        sublabel: 'Previous Year Questions',
-        pro: true,
-        cb: "CF.openPYQ()"
-      },
-      {
-        id: 'mock',
-        icon: '🎯',
-        label: 'Mock Test',
-        sublabel: 'Timed Practice Exam',
-        pro: true,
-        cb: "MockTest._state=null;CF.openMockTest()"
-      },
-      {
         id: 'analytics',
         icon: '📊',
         label: 'Analytics',
@@ -644,14 +577,6 @@
         cb: "CF.openStudyGroups()"
       },
       {
-        id: 'goal',
-        icon: '🔥',
-        label: 'Daily Goal',
-        sublabel: 'Track today\'s study target',
-        pro: false,
-        cb: "CF.openDailyGoal()"
-      },
-      {
         id: 'refer',
         icon: '🎁',
         label: 'Refer & Earn',
@@ -671,13 +596,6 @@
       <div class="cf-tools-header">
         <div class="cf-tools-header-dot"></div>
         <div class="cf-tools-header-label">Study Tools</div>
-      </div>
-
-      <!-- Daily Goal Bar -->
-      <div id="cf-daily-bar" title="Daily study goal" onclick="CF.openDailyGoal();${dismissDrawer}">
-        <span style="font-size:15px">🎯</span>
-        <div id="cf-goal-bar-track"><div id="cf-goal-bar"></div></div>
-        <span id="cf-daily-badge">0/15</span>
       </div>
 
       <!-- 2×2 Grid Tools -->
