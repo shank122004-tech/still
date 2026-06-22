@@ -23,7 +23,9 @@ const cors      = require('cors')({
   'https://crackwithai.in',
   'https://www.crackwithai.in',
   'https://rankgpt-f8a64.web.app',
+  'https://shank122004-tech.github.io',
   'https://rankgpt-f8a64.firebaseapp.com'
+  
 ],
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -695,10 +697,7 @@ const CF_API        = process.env.CASHFREE_ENV === 'sandbox'
   ? 'https://sandbox.cashfree.com/pg'
   : 'https://api.cashfree.com/pg';
 
-exports.createCashfreeOrder = onRequest((req, res) => {
-  enforceHttps(req, res);
-  cors(req, res, async () => {
-    if (req.method === 'OPTIONS') return res.status(204).send('');
+exports.createCashfreeOrder = onRequest((req, res) => { res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); enforceHttps(req, res); cors(req, res, async () => { if (req.method === 'OPTIONS') { return res.status(204).send(''); }
     try {
       // Auth: must be a logged-in user to create an order
       const decoded = await verifyToken(req);
