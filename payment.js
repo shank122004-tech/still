@@ -20,7 +20,7 @@
   const CF_ENV = 'production';
 
   // Always use the new Cloud Run URLs — they have CORS open for all origins
-  const ORDER_URL  = 'https://createcashfreeorder-419137308157.us-central1.run.appF';
+  const ORDER_URL  = 'https://createcashfreeorder-419137308157.us-central1.run.app';
   const VERIFY_URL = 'https://verifypayment-419137308157.us-central1.run.app';
 
   const PLANS = {
