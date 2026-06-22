@@ -20,12 +20,12 @@
   const CF_ENV = 'production';
 
   // Always use the new Cloud Run URLs — they have CORS open for all origins
-  const ORDER_URL  = 'https://createcashfreeorder-56khnynjia-uc.a.run.app';
-  const VERIFY_URL = 'https://verifypayment-56khnynjia-uc.a.run.app';
+  const ORDER_URL  = 'https://createcashfreeorder-419137308157.us-central1.run.appF';
+  const VERIFY_URL = 'https://verifypayment-419137308157.us-central1.run.app';
 
   const PLANS = {
     premium:          { id: 'premium',          name: 'Premium',                price: 199,  emoji: '⭐' },
-    ssc:              { id: 'ssc',              name: 'SSC Pro',                 price: 1,  emoji: '🎯' },
+    ssc:              { id: 'ssc',              name: 'SSC Pro',                 price: 199,  emoji: '🎯' },
     class10:          { id: 'class10',          name: 'Class Pro',               price: 129,  emoji: '📖' },
     class10_yearly:   { id: 'class10_yearly',   name: 'Class Pro Yearly',        price: 1299, emoji: '📖' },
     semiannual:       { id: 'semiannual',        name: 'SSC 6-Month Plan',        price: 499,  emoji: '🔥' },
