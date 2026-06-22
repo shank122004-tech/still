@@ -25,7 +25,7 @@
 
   const PLANS = {
     premium:          { id: 'premium',          name: 'Premium',                price: 199,  emoji: '⭐' },
-    ssc:              { id: 'ssc',              name: 'SSC Pro',                 price: 199,  emoji: '🎯' },
+    ssc:              { id: 'ssc',              name: 'SSC Pro',                 price: 1,  emoji: '🎯' },
     class10:          { id: 'class10',          name: 'Class Pro',               price: 129,  emoji: '📖' },
     class10_yearly:   { id: 'class10_yearly',   name: 'Class Pro Yearly',        price: 1299, emoji: '📖' },
     semiannual:       { id: 'semiannual',        name: 'SSC 6-Month Plan',        price: 499,  emoji: '🔥' },
