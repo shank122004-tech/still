@@ -2620,6 +2620,11 @@
         const totalXP = (existing?.xp || 0) + battleXP;
         const battles = (existing?.battles || 0) + 1;
         const wins = existing?.wins || 0;
+        
+        // Get coins from localStorage
+        const coinsKey = 'sscai_u:' + userUid + ':coins';
+        const coinsData = JSON.parse(localStorage.getItem(coinsKey) || '{"coins":0}');
+        const totalCoins = coinsData.coins || 0;
 
         // Grab photoURL + equipped avatar to show in leaderboard
         const _lbPhotoURL = (() => { try { const u = window._firebaseAuth && window._firebaseAuth.currentUser; return (u && u.photoURL) ? u.photoURL : ''; } catch(e) { return ''; } })();
@@ -2644,6 +2649,7 @@
           xp: totalXP,
           battles,
           wins,
+          coins: totalCoins,
           weekKey,
           updatedAt: Date.now(),
           photoURL: _lbPhotoURL,
@@ -2661,6 +2667,7 @@
             xp: (at ? at.xp || 0 : 0) + battleXP,
             battles: (at ? at.battles || 0 : 0) + 1,
             wins: at ? at.wins || 0 : 0,
+            coins: totalCoins,
             updatedAt: Date.now(),
             photoURL: _lbPhotoURL,
             avatar: _lbAvatar
@@ -2787,7 +2794,12 @@
 
         // Demo bot entries excluded -- rank must reflect real players only
 
-        weeklyEntries.sort((a,b) => b.xp - a.xp);
+        weeklyEntries.sort((a,b) => {
+          // Sort by wins first (descending), then coins, then XP
+          if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
+          if ((b.coins || 0) !== (a.coins || 0)) return (b.coins || 0) - (a.coins || 0);
+          return (b.xp || 0) - (a.xp || 0);
+        });
         this._renderLbContent(body, weeklyEntries, weekKey, myUid);
 
       } catch(e) {
@@ -2819,16 +2831,30 @@
 
       if (myRank > 0 && myData) {
         const levelData = getLevelTitle(Math.floor(myData.xp / 10));
+        const wins = myData.wins || 0;
+        const coins = myData.coins || 0;
         html += `
-          <div style="background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.3);border-radius:12px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:12px;">
-            <div style="font-size:24px;">${levelData.emoji}</div>
-            <div style="flex:1;">
-              <div style="font-size:13px;font-weight:700;color:#fff;">Your Rank: #${myRank}</div>
-              <div style="font-size:11px;color:rgba(200,195,255,0.5);">Level ${Math.floor(myData.xp/10)} ${levelData.title} · ${myData.xp} XP</div>
+          <div style="background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.3);border-radius:12px;padding:12px 14px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+              <div style="font-size:24px;">${levelData.emoji}</div>
+              <div style="flex:1;">
+                <div style="font-size:13px;font-weight:700;color:#fff;">Your Rank: #${myRank}</div>
+                <div style="font-size:11px;color:rgba(200,195,255,0.5);">Level ${Math.floor(myData.xp/10)} ${levelData.title} · ${myData.xp} XP</div>
+              </div>
             </div>
-            <div style="text-align:right;">
-              <div style="font-size:14px;font-weight:800;color:#f59e0b;">${myData.xp} XP</div>
-              <div style="font-size:10px;color:rgba(200,195,255,0.4);">${myData.battles||0} battles</div>
+            <div style="display:flex;gap:12px;justify-content:space-around;padding-top:8px;border-top:1px solid rgba(108,99,255,0.2);">
+              <div style="text-align:center;flex:1;">
+                <div style="font-size:14px;font-weight:800;color:#f59e0b;">${wins}</div>
+                <div style="font-size:10px;color:rgba(200,195,255,0.4);">⚔️ Wins</div>
+              </div>
+              <div style="text-align:center;flex:1;">
+                <div style="font-size:14px;font-weight:800;color:#fbbf24;">${coins}</div>
+                <div style="font-size:10px;color:rgba(200,195,255,0.4);">🪙 Coins</div>
+              </div>
+              <div style="text-align:center;flex:1;">
+                <div style="font-size:14px;font-weight:800;color:#a78bfa;">${myData.xp}</div>
+                <div style="font-size:10px;color:rgba(200,195,255,0.4);">⚡ XP</div>
+              </div>
             </div>
           </div>`;
       }
@@ -2887,6 +2913,8 @@
           const levelData = getLevelTitle(level);
           const avatarHtml = _lbAvatarHtml(e, levelData);
           const isDemo = e._demo === true;
+          const wins = e.wins || 0;
+          const coins = e.coins || 0;
 
           html += `
             <div class="lb-row ${isMe?'me':''} ${rank<=3?'top3':''}">
@@ -2896,9 +2924,19 @@
                 <div class="lb-name">${e.name||'Student'} ${isMe?'<span style="font-size:10px;background:rgba(108,99,255,0.2);color:#a78bfa;padding:1px 6px;border-radius:10px;">You</span>':''}</div>
                 <div class="lb-level" style="color:${levelData.color};">${levelData.emoji} Lv.${level} ${levelData.title}</div>
               </div>
-              <div class="lb-xp-col">
-                <div class="lb-xp-val">${e.xp||0}</div>
-                <div class="lb-xp-lbl">${e.battles||0} battles</div>
+              <div class="lb-stats-col" style="display:flex;gap:16px;text-align:center;">
+                <div style="flex:1;">
+                  <div class="lb-xp-val">${wins}</div>
+                  <div class="lb-xp-lbl">⚔️ Wins</div>
+                </div>
+                <div style="flex:1;">
+                  <div class="lb-xp-val">${coins}</div>
+                  <div class="lb-xp-lbl">🪙 Coins</div>
+                </div>
+                <div style="flex:1;">
+                  <div class="lb-xp-val">${e.xp||0}</div>
+                  <div class="lb-xp-lbl">⚡ XP</div>
+                </div>
               </div>
             </div>`;
         });
@@ -2938,8 +2976,15 @@
         } catch(e) {
           // Fallback without index
           const snap2 = await getDocs(collection(db, 'battleLeaderboardAllTime'));
-          entries = snap2.docs.map(d => d.data()).sort((a, b) => (b.xp || 0) - (a.xp || 0)).slice(0, 50);
+          entries = snap2.docs.map(d => d.data());
         }
+        // Sort by wins first, then coins, then XP
+        entries.sort((a, b) => {
+          if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
+          if ((b.coins || 0) !== (a.coins || 0)) return (b.coins || 0) - (a.coins || 0);
+          return (b.xp || 0) - (a.xp || 0);
+        });
+        entries = entries.slice(0, 50);
         this._renderLbContent(body, entries, null, myUid);
       } catch(e) {
         body.innerHTML = `<div class="ba-empty">📭 No all-time data yet. Play battles to appear here!</div>`;
