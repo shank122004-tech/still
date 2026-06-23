@@ -1875,6 +1875,17 @@ async function _generateQuizQuestions(exam, count, type) {
         CF._renderQuizResults(quiz, memberNames);
         return;
       }
+
+      // Hide questions during countdown
+      if (quiz.status === 'countdown') {
+        body.innerHTML = `<div style="text-align:center;padding:40px 20px;">
+          <div style="font-size:48px;margin-bottom:20px;">⏳</div>
+          <div style="font-size:18px;font-weight:800;color:#fff;margin-bottom:8px;">Get Ready!</div>
+          <div style="font-size:13px;color:rgba(200,195,255,0.5);">Battle starting in a moment…</div>
+        </div>`;
+        return;
+      }
+
       const qi = quiz.current;
       const q = quiz.questions[qi];
       if (!q) return;
@@ -1887,8 +1898,14 @@ async function _generateQuizQuestions(exam, count, type) {
       const wa = document.getElementById('cf-group-waiting-area');
       if (wa) wa.innerHTML = '';
 
+      // Shuffle options per user using deterministic hash
+      const seed = (myUid + qi).split('').reduce((a,b)=>{a=((a<<5)-a)+b.charCodeAt(0);return a&a},0);
+      const shuffled = [...(q.opts || q.options || [])].map((o,i)=>({o,i})).sort(()=>seed%2?1:-1);
+      const optMap = shuffled.map(x=>x.i);
+      const correctIdx = optMap.indexOf(q.ans);
+
       body.innerHTML = `
-        <div class="cf-quiz-battle-wrap">
+        <div class="cf-quiz-battle-wrap" style="animation:slideIn 0.3s ease;">
           <div class="cf-quiz-progress-row">
             <span class="cf-quiz-qnum">Q ${qi+1} <span style="opacity:0.5;">/ ${quiz.questions.length}</span></span>
             <span class="cf-quiz-xp-pill" style="background:rgba(108,99,255,0.15);border:1px solid rgba(108,99,255,0.3);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:800;color:#a78bfa;">⚡ ${quiz.xp && quiz.xp[myUid] ? quiz.xp[myUid] : 0} XP</span>
@@ -1906,16 +1923,17 @@ async function _generateQuizQuestions(exam, count, type) {
           </div>
           <div class="cf-quiz-q">${q.question || q.q}</div>
           <div class="cf-quiz-opts" id="cf-quiz-opts">
-            ${(q.opts || q.options || []).map((o,j)=>{
+            ${shuffled.map((item,j)=>{
+              const o = item.o;
               let cls = 'cf-quiz-opt';
               if (someoneAnswered) {
-                if (j === q.ans) cls += ' cf-quiz-opt-correct';
-                else if (answered && j === answered.chosen && j !== q.ans) cls += ' cf-quiz-opt-wrong';
+                if (j === correctIdx) cls += ' cf-quiz-opt-correct';
+                else if (answered && j === optMap.indexOf(answered.chosen) && j !== correctIdx) cls += ' cf-quiz-opt-wrong';
                 else cls += ' cf-quiz-opt-dim';
               }
               return `<button class="${cls} ${someoneAnswered?'cf-quiz-opt-disabled':''}" 
-                data-idx="${j}" 
-                onclick="${someoneAnswered ? '' : `CF._submitQuizAnswer('${groupId}',${qi},${j})`}"
+                data-idx="${item.i}" 
+                onclick="${someoneAnswered ? '' : `CF._submitQuizAnswer('${groupId}',${qi},${item.i})`}"
                 ${someoneAnswered ? 'disabled' : ''}>
                 <span class="cf-quiz-opt-letter">${String.fromCharCode(65+j)}</span>
                 <span>${o}</span>
@@ -1931,7 +1949,13 @@ async function _generateQuizQuestions(exam, count, type) {
             <div class="cf-quiz-exp">💡 ${q.exp||q.explanation||'Keep going!'}</div>
           ` : `<div class="cf-quiz-waiting">⚡ Be first to answer and earn <b>+10 XP</b>!</div>`}
           ${CF._renderXPBoard(quiz, memberNames)}
-        </div>`;
+        </div>
+        <style>
+          @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+        </style>`;
 
       // Start or maintain the 30s per-question timer
       if (!someoneAnswered) {
@@ -2343,8 +2367,8 @@ async function _generateQuizQuestions(exam, count, type) {
 
       // Render answer feedback immediately
       CF._renderQuizQuestion(optimisticQuiz, groupId, g.memberNames);
-      if (correct) { toast('✅ Correct! +10 XP 🔥', 1500); if (typeof XP !== 'undefined') XP.add(10); }
-      else { toast('❌ Wrong! -3 XP', 1500); }
+      if (correct) { toast('✅ Correct! +10 XP 🔥', 1200); if (typeof XP !== 'undefined') XP.add(10); }
+      else { toast('❌ Wrong! -3 XP', 1200); }
 
       // Pre-set poll hash so poller won't re-render and fight the animation
       CF._chatPollHash = JSON.stringify({
@@ -2354,19 +2378,19 @@ async function _generateQuizQuestions(exam, count, type) {
         members: (g.members || []).length
       });
 
-      // After 1.5s show next question or results
+      // After 1.2s show next question or results
       if (isLast) {
         setTimeout(function() {
           CF._answerAnimating = false;
           CF._renderQuizResults(optimisticQuiz, g.memberNames);
-        }, 1500);
+        }, 1200);
       } else {
         setTimeout(function() {
           CF._answerAnimating = false;
           const latest = CF._currentGroupData && CF._currentGroupData.quiz;
           CF._renderQuizQuestion(latest || optimisticQuiz, groupId, (CF._currentGroupData || g).memberNames);
           CF._startGroupQuizTimer(groupId, (latest || optimisticQuiz).current, (latest || optimisticQuiz).questionStartedAt);
-        }, 1500);
+        }, 1200);
       }
 
       // ── BACKGROUND SYNC — fire-and-forget, NO follow-up getDoc ──
@@ -3109,7 +3133,7 @@ async function _generateQuizQuestions(exam, count, type) {
     if (CF._liveState && CF._liveState.poll) clearInterval(CF._liveState.poll);
     if (!CF._liveState) CF._liveState = {};
     CF._renderLiveAnalytics(groupId);
-    CF._liveState.poll = setInterval(() => CF._renderLiveAnalytics(groupId), 2000);
+    CF._liveState.poll = setInterval(() => CF._renderLiveAnalytics(groupId), 1000);
   };
 
   CF._renderLiveAnalytics = async function(groupId) {
@@ -3192,9 +3216,29 @@ async function _generateQuizQuestions(exam, count, type) {
             }).join('')}
         </div>
         ${!isFinished ? `<div style="margin-top:10px;text-align:center;">
-          <button class="cf-btn cf-btn-danger" style="font-size:12px;padding:7px 16px;" onclick="CF._endBattle&&CF._endBattle('${groupId}')">🛑 End Battle for All</button>
+          <button class="cf-btn cf-btn-danger" style="font-size:12px;padding:7px 16px;" onclick="CF._endBattle('${groupId}')">🛑 End Battle for All</button>
         </div>` : ''}`;
     } catch(e) {}
+  };
+
+  CF._endBattle = async function(groupId) {
+    try {
+      const db = window._firebaseDb;
+      const { doc, updateDoc } = window._firebaseFns;
+      if (!db || !updateDoc) return;
+      const myUid = (typeof uid === 'function') ? uid() : 'guest';
+      await updateDoc(doc(db, 'studyGroups', groupId), {
+        'quiz.status': 'finished',
+        'quiz.endedBy': myUid,
+        'quiz.endedAt': Date.now()
+      });
+      toast('✅ Battle ended for all players', 2000);
+      setTimeout(() => {
+        if (CF._liveState && CF._liveState.poll) clearInterval(CF._liveState.poll);
+      }, 500);
+    } catch(e) {
+      toast('❌ Could not end battle: ' + e.message, 2000);
+    }
   };
 
   // Presence tracking - exits & idle
