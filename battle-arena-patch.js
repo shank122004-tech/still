@@ -5241,7 +5241,7 @@
     if (!global.CF) return;
     if (global.CF._readTrackingPatched) return;
 
-    const _origRender = global.CF._renderChatMessages?.bind(global.CF);
+    const _origRender = global.CF._renderChatMessages && typeof global.CF._renderChatMessages === 'function' ? global.CF._renderChatMessages.bind(global.CF) : null;
     if (_origRender) {
       global.CF._renderChatMessages = function (messages) {
         _origRender(messages);
@@ -5253,8 +5253,8 @@
     }
 
     /* Patch the chat poller to also run cleanup checks */
-    const _origOpenGC = global.CF._openGroupChat?.bind(global.CF);
-    if (_origOpenGC) {
+    if (global.CF._openGroupChat && typeof global.CF._openGroupChat === 'function') {
+      const _origOpenGC = global.CF._openGroupChat.bind(global.CF);
       global.CF._openGroupChat = async function (groupId) {
         await _origOpenGC(groupId);
 
