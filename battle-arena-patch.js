@@ -842,43 +842,71 @@
       .ba-result-stat-lbl { font-size: 10px; color: rgba(200,195,255,0.45); margin-top: 4px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
 
       /* ── Leaderboard ── */
-      .lb-tab-row { display: flex; gap: 8px; margin-bottom: 16px; }
+      .lb-tab-row { display: flex; gap: 10px; margin-bottom: 18px; }
       .lb-tab {
-        flex: 1; padding: 9px 8px; background: rgba(255,255,255,0.04);
-        border: 1px solid rgba(108,99,255,0.15); border-radius: 12px;
-        color: rgba(200,195,255,0.55); font-size: 12px; font-weight: 800;
-        cursor: pointer; text-align: center; transition: all 0.15s; font-family: inherit;
-        letter-spacing: 0.02em;
+        flex: 1; padding: 11px 12px; background: rgba(255,255,255,0.03);
+        border: 1.5px solid rgba(108,99,255,0.12); border-radius: 14px;
+        color: rgba(200,195,255,0.6); font-size: 13px; font-weight: 800;
+        cursor: pointer; text-align: center; transition: all 0.2s; font-family: inherit;
+        letter-spacing: 0.03em;
+      }
+      .lb-tab:hover {
+        background: rgba(108,99,255,0.08); border-color: rgba(108,99,255,0.25);
+        color: rgba(200,195,255,0.8);
       }
       .lb-tab.active {
-        background: rgba(108,99,255,0.18); border-color: rgba(108,99,255,0.45);
-        color: #a78bfa; box-shadow: 0 2px 12px rgba(108,99,255,0.2);
+        background: linear-gradient(135deg,rgba(108,99,255,0.22),rgba(108,99,255,0.14)); 
+        border-color: rgba(108,99,255,0.45);
+        color: #a78bfa; box-shadow: 0 4px 16px rgba(108,99,255,0.18);
       }
       .lb-row {
-        display: flex; align-items: center; gap: 12px; padding: 12px 14px;
-        background: rgba(255,255,255,0.025); border-radius: 14px; margin-bottom: 8px;
-        border: 1px solid rgba(108,99,255,0.1); transition: all 0.15s;
+        display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+        background: linear-gradient(135deg,rgba(108,99,255,0.06),rgba(108,99,255,0.02)); border-radius: 16px; margin-bottom: 10px;
+        border: 1.5px solid rgba(108,99,255,0.15); transition: all 0.2s; position: relative; overflow: hidden;
       }
-      .lb-row:hover { border-color: rgba(108,99,255,0.25); background: rgba(108,99,255,0.04); }
-      .lb-row.me { border-color: rgba(108,99,255,0.35); background: rgba(108,99,255,0.08); }
-      .lb-row.top3 { border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.04); }
-      .lb-rank { font-size: 22px; min-width: 28px; text-align: center; }
+      .lb-row::before {
+        content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+        background: linear-gradient(180deg, rgba(108,99,255,0.3), transparent); opacity: 0;
+        transition: opacity 0.2s;
+      }
+      .lb-row:hover { 
+        border-color: rgba(108,99,255,0.35); 
+        background: linear-gradient(135deg,rgba(108,99,255,0.12),rgba(108,99,255,0.06)); 
+        box-shadow: 0 8px 24px rgba(108,99,255,0.12);
+        transform: translateX(4px);
+      }
+      .lb-row:hover::before { opacity: 1; }
+      .lb-row.me { 
+        border-color: rgba(108,99,255,0.45); 
+        background: linear-gradient(135deg,rgba(108,99,255,0.18),rgba(108,99,255,0.1)); 
+        box-shadow: 0 8px 28px rgba(108,99,255,0.18);
+      }
+      .lb-row.me::before { opacity: 1; }
+      .lb-row.top3 { 
+        border-color: rgba(245,158,11,0.4); 
+        background: linear-gradient(135deg,rgba(245,158,11,0.12),rgba(245,158,11,0.05)); 
+      }
+      .lb-row.top3 .lb-rank { animation: pulse-gold 2s infinite; }
+      @keyframes pulse-gold { 0%, 100% { text-shadow: 0 0 0 transparent; } 50% { text-shadow: 0 0 12px rgba(245,158,11,0.6); } }
+      .lb-rank { font-size: 24px; min-width: 32px; text-align: center; font-weight: 900; }
       .lb-avatar {
-        width: 40px; height: 40px; border-radius: 12px;
+        width: 48px; height: 48px; border-radius: 14px;
         display: flex; align-items: center; justify-content: center;
-        font-size: 18px; font-weight: 800; flex-shrink: 0;
-        border: 1px solid rgba(108,99,255,0.2);
+        font-size: 22px; font-weight: 800; flex-shrink: 0;
+        border: 1.5px solid rgba(108,99,255,0.25); background: rgba(108,99,255,0.08);
+        box-shadow: 0 4px 12px rgba(108,99,255,0.1);
       }
       .lb-info { flex: 1; min-width: 0; }
-      .lb-name { font-size: 13px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .lb-level { font-size: 11px; margin-top: 2px; font-weight: 600; }
+      .lb-name { font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.3px; }
+      .lb-level { font-size: 12px; margin-top: 3px; font-weight: 600; color: rgba(200,195,255,0.6); }
       .lb-xp-col { text-align: right; flex-shrink: 0; }
-      .lb-xp-val { font-size: 16px; font-weight: 900; color: #f59e0b; }
-      .lb-xp-lbl { font-size: 10px; color: rgba(200,195,255,0.35); margin-top: 2px; font-weight: 700; letter-spacing: 0.04em; }
+      .lb-xp-val { font-size: 17px; font-weight: 900; color: #a78bfa; font-family: 'Space Grotesk', monospace; letter-spacing: -0.5px; }
+      .lb-xp-lbl { font-size: 10px; color: rgba(200,195,255,0.4); margin-top: 3px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
       .lb-weekly-notice {
-        background: linear-gradient(135deg,rgba(245,158,11,0.1),rgba(255,107,157,0.06));
-        border: 1px solid rgba(245,158,11,0.25); border-radius: 14px; padding: 14px 16px; margin-bottom: 18px;
-        font-size: 12px; line-height: 1.7; color: rgba(255,220,150,0.85);
+        background: linear-gradient(135deg,rgba(245,158,11,0.15),rgba(255,107,157,0.08));
+        border: 1.5px solid rgba(245,158,11,0.35); border-radius: 16px; padding: 16px 18px; margin-bottom: 20px;
+        font-size: 12px; line-height: 1.8; color: rgba(255,220,150,0.9);
+        box-shadow: 0 8px 24px rgba(245,158,11,0.08);
       }
       .lb-theme-toggle {
         padding: 6px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(108,99,255,0.2);
@@ -2621,7 +2649,6 @@
       }
     },
 
-    /* ── Save XP to Leaderboard ── */
     async _saveToLeaderboard(userUid, userName, battleXP) {
       try {
         const db = window._firebaseDb;
@@ -2635,6 +2662,27 @@
         const totalXP = (existing?.xp || 0) + battleXP;
         const battles = (existing?.battles || 0) + 1;
         const wins = existing?.wins || 0;
+        
+        // Ensure name is never empty - try multiple sources
+        let finalName = 'Student';
+        if (userName && userName.trim()) {
+          finalName = userName.trim();
+        } else if (existing?.name && existing.name !== 'Student') {
+          finalName = existing.name;
+        } else {
+          // Try to get from Firebase auth
+          try {
+            const cu = window._firebaseAuth?.currentUser;
+            if (cu && cu.uid === userUid) {
+              if (cu.displayName && cu.displayName.trim()) {
+                finalName = cu.displayName.trim();
+              } else if (cu.email) {
+                const prefix = cu.email.split('@')[0];
+                finalName = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+              }
+            }
+          } catch(e) {}
+        }
         
         // Get coins from localStorage
         const coinsKey = 'sscai_u:' + userUid + ':coins';
@@ -2660,7 +2708,7 @@
         })();
         await setDoc(doc(db, 'battleLeaderboard', docId), {
           uid: userUid,
-          name: userName,
+          name: finalName,
           xp: totalXP,
           battles,
           wins,
@@ -2678,7 +2726,7 @@
           const at = allTimeSnap.exists() ? allTimeSnap.data() : null;
           await setDoc(allTimeRef, {
             uid: userUid,
-            name: userName,
+            name: finalName,
             xp: (at ? at.xp || 0 : 0) + battleXP,
             battles: (at ? at.battles || 0 : 0) + 1,
             wins: at ? at.wins || 0 : 0,
@@ -2821,6 +2869,22 @@
           if ((b.coins || 0) !== (a.coins || 0)) return (b.coins || 0) - (a.coins || 0);
           return (b.xp || 0) - (a.xp || 0);
         });
+
+        // Ensure all entries have names - fill in missing names from auth
+        if (window._firebaseAuth && window._firebaseAuth.currentUser) {
+          const myUid = window._firebaseAuth.currentUser.uid;
+          weeklyEntries = weeklyEntries.map(entry => {
+            if (!entry.name || entry.name === 'Student') {
+              if (entry.uid === myUid && entry.uid !== 'guest') {
+                const cu = window._firebaseAuth.currentUser;
+                const displayName = cu?.displayName || cu?.email?.split('@')[0] || 'Student';
+                entry.name = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+              }
+            }
+            return entry;
+          });
+        }
+
         this._renderLbContent(body, weeklyEntries, weekKey, myUid);
 
       } catch(e) {
@@ -2853,28 +2917,24 @@
       if (myRank > 0 && myData) {
         const levelData = getLevelTitle(Math.floor(myData.xp / 10));
         const wins = myData.wins || 0;
-        const coins = myData.coins || 0;
         html += `
-          <div style="background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.3);border-radius:12px;padding:12px 14px;margin-bottom:14px;">
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-              <div style="font-size:24px;">${levelData.emoji}</div>
+          <div style="background:linear-gradient(135deg,rgba(108,99,255,0.14),rgba(108,99,255,0.06));border:1.5px solid rgba(108,99,255,0.35);border-radius:16px;padding:16px 18px;margin-bottom:18px;box-shadow:0 8px 28px rgba(108,99,255,0.12);">
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+              <div style="font-size:28px;">${levelData.emoji}</div>
               <div style="flex:1;">
-                <div style="font-size:13px;font-weight:700;color:#fff;">Your Rank: #${myRank}</div>
-                <div style="font-size:11px;color:rgba(200,195,255,0.5);">Level ${Math.floor(myData.xp/10)} ${levelData.title} · ${myData.xp} XP</div>
+                <div style="font-size:14px;font-weight:800;color:#fff;letter-spacing:-0.3px;">Your Rank: #${myRank}</div>
+                <div style="font-size:12px;color:rgba(200,195,255,0.6);margin-top:2px;">Level ${Math.floor(myData.xp/10)} ${levelData.title}</div>
               </div>
             </div>
-            <div style="display:flex;gap:12px;justify-content:space-around;padding-top:8px;border-top:1px solid rgba(108,99,255,0.2);">
-              <div style="text-align:center;flex:1;">
-                <div style="font-size:14px;font-weight:800;color:#f59e0b;">${wins}</div>
-                <div style="font-size:10px;color:rgba(200,195,255,0.4);">⚔️ Wins</div>
+            <div style="display:flex;gap:12px;justify-content:center;padding-top:12px;border-top:1.5px solid rgba(108,99,255,0.2);">
+              <div style="text-align:center;flex:0 0 auto;">
+                <div style="font-size:16px;font-weight:900;color:#a78bfa;font-family:'Space Grotesk',monospace;">${wins}</div>
+                <div style="font-size:10px;color:rgba(200,195,255,0.4);margin-top:4px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;">⚔️ Wins</div>
               </div>
-              <div style="text-align:center;flex:1;">
-                <div style="font-size:14px;font-weight:800;color:#fbbf24;">${coins}</div>
-                <div style="font-size:10px;color:rgba(200,195,255,0.4);">🪙 Coins</div>
-              </div>
-              <div style="text-align:center;flex:1;">
-                <div style="font-size:14px;font-weight:800;color:#a78bfa;">${myData.xp}</div>
-                <div style="font-size:10px;color:rgba(200,195,255,0.4);">⚡ XP</div>
+              <div style="width:1px;background:rgba(108,99,255,0.25);margin:0 12px;"></div>
+              <div style="text-align:center;flex:0 0 auto;">
+                <div style="font-size:16px;font-weight:900;color:#a78bfa;font-family:'Space Grotesk',monospace;">${myData.xp}</div>
+                <div style="font-size:10px;color:rgba(200,195,255,0.4);margin-top:4px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;">⚡ XP</div>
               </div>
             </div>
           </div>`;
@@ -2936,7 +2996,7 @@
           const isDemo = e._demo === true;
           const wins = e.wins || 0;
           const coins = e.coins || 0;
-          const demoLabel = isDemo ? '<span style="font-size:9px;background:rgba(100,100,100,0.4);color:#999;padding:2px 6px;border-radius:8px;margin-left:6px;">🤖 Demo</span>' : '';
+          const demoLabel = '';
 
           html += `
             <div class="lb-row ${isMe?'me':''} ${rank<=3?'top3':''} ${isDemo?'demo-entry':''}">
@@ -2946,16 +3006,12 @@
                 <div class="lb-name">${e.name||'Student'} ${isMe?'<span style="font-size:10px;background:rgba(108,99,255,0.2);color:#a78bfa;padding:1px 6px;border-radius:10px;">You</span>':''}${demoLabel}</div>
                 <div class="lb-level" style="color:${levelData.color};">${levelData.emoji} Lv.${level} ${levelData.title}</div>
               </div>
-              <div class="lb-stats-col" style="display:flex;gap:16px;text-align:center;">
-                <div style="flex:1;">
+              <div class="lb-stats-col" style="display:flex;gap:24px;text-align:center;align-items:center;">
+                <div style="flex:0 0 auto;text-align:center;">
                   <div class="lb-xp-val">${wins}</div>
                   <div class="lb-xp-lbl">⚔️ Wins</div>
                 </div>
-                <div style="flex:1;">
-                  <div class="lb-xp-val">${coins}</div>
-                  <div class="lb-xp-lbl">🪙 Coins</div>
-                </div>
-                <div style="flex:1;">
+                <div style="flex:0 0 auto;text-align:center;">
                   <div class="lb-xp-val">${e.xp||0}</div>
                   <div class="lb-xp-lbl">⚡ XP</div>
                 </div>
@@ -3014,6 +3070,22 @@
           if ((b.coins || 0) !== (a.coins || 0)) return (b.coins || 0) - (a.coins || 0);
           return (b.xp || 0) - (a.xp || 0);
         });
+
+        // Ensure all entries have names - fill in missing names from auth
+        if (window._firebaseAuth && window._firebaseAuth.currentUser) {
+          const myUid = window._firebaseAuth.currentUser.uid;
+          entries = entries.map(entry => {
+            if (!entry.name || entry.name === 'Student') {
+              if (entry.uid === myUid && entry.uid !== 'guest') {
+                const cu = window._firebaseAuth.currentUser;
+                const displayName = cu?.displayName || cu?.email?.split('@')[0] || 'Student';
+                entry.name = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+              }
+            }
+            return entry;
+          });
+        }
+
         entries = entries.slice(0, 50);
         this._renderLbContent(body, entries, null, myUid);
       } catch(e) {
