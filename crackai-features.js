@@ -2965,6 +2965,147 @@ async function _generateQuizQuestions(exam, count, type) {
   }
 
   /* ─────────────────────────────────────────────────────────────
+   * GROUP BATTLE OPTIMIZATIONS
+   * ───────────────────────────────────────────────────────────── */
+
+  // FIX: Prevent questions showing before admin starts battle + optimize polling
+  const _origRQQ = CF._renderQuizQuestion;
+  CF._renderQuizQuestion = function(quiz, groupId, memberNames) {
+    const body = document.getElementById('cf-quiz-area');
+    if (!body) return;
+    if (!quiz || !quiz.status) { body.innerHTML = ''; return; }
+    if (quiz.status !== 'active') { body.innerHTML = ''; return; }
+    if (!quiz.questions || quiz.questions.length === 0) { body.innerHTML = '<div style="padding:20px;text-align:center;color:rgba(200,195,255,0.5);">⏳ Loading questions…</div>'; return; }
+    const qi = quiz.current || 0;
+    if (qi < 0 || qi >= quiz.questions.length) { body.innerHTML = ''; return; }
+    return _origRQQ.call(this, quiz, groupId, memberNames);
+  };
+
+  // Optimize polling to 800ms
+  const _origOGC = CF._openGroupChat;
+  CF._openGroupChat = async function(groupId) {
+    const result = await _origOGC.call(this, groupId);
+    setTimeout(() => {
+      if (CF._chatPollInterval) clearInterval(CF._chatPollInterval);
+      const db = window._firebaseDb, { doc, getDoc } = window._firebaseFns || {};
+      if (db && getDoc) {
+        CF._chatPollInterval = setInterval(async () => {
+          if (!CF._currentGroupId) return;
+          try {
+            const snap = await getDoc(doc(db, 'studyGroups', CF._currentGroupId));
+            if (!snap.exists()) { if (typeof CF._stopChatPolling === 'function') CF._stopChatPolling(); return; }
+            const data = snap.data();
+            const newHash = JSON.stringify({ quizStatus: data.quiz?.status, quizQ: data.quiz?.current, quizAnswers: Object.keys(data.quiz?.answers||{}).length, members: (data.members||[]).length });
+            if (newHash !== CF._chatPollHash) {
+              CF._chatPollHash = newHash;
+              CF._currentGroupData = data;
+              if (data.quiz?.status === 'countdown' && !CF._groupCountdownShown) {
+                if (typeof CF._handleGroupCountdown === 'function') CF._handleGroupCountdown(data, CF._currentGroupId);
+              } else if (data.quiz?.status === 'active') {
+                if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
+                if (typeof CF._renderQuizQuestion === 'function') CF._renderQuizQuestion(data.quiz, CF._currentGroupId, data.memberNames);
+                if (typeof CF._startGroupQuizTimer === 'function') CF._startGroupQuizTimer(CF._currentGroupId, data.quiz.current, data.quiz.questionStartedAt);
+              } else if (data.quiz?.status === 'finished') {
+                if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
+                if (typeof CF._renderQuizResults === 'function') CF._renderQuizResults(data.quiz, data.memberNames);
+              } else {
+                if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
+                if (typeof CF._renderGroupWaitingRoom === 'function') CF._renderGroupWaitingRoom(data, CF._currentGroupId, data.adminUid === (typeof uid === 'function' ? uid() : 'guest'));
+                const qa = document.getElementById('cf-quiz-area');
+                if (qa) qa.innerHTML = '';
+              }
+            }
+          } catch(e) {}
+        }, 800);
+      }
+    }, 100);
+    return result;
+  };
+
+  // Live analytics dashboard for admin
+  CF.openLiveAnalytics = function(groupId) {
+    const modal = document.getElementById('cf-groups-modal'), body = document.getElementById('cf-groups-modal_body');
+    if (!modal || !body) return;
+    body.innerHTML = `<div class="cf-loading-wrap"><div class="cf-spinner"></div><p class="cf-muted">Loading live dashboard…</p></div>`;
+    if (CF._liveState && CF._liveState.poll) clearInterval(CF._liveState.poll);
+    if (!CF._liveState) CF._liveState = {};
+    CF._renderLiveAnalytics(groupId);
+    CF._liveState.poll = setInterval(() => CF._renderLiveAnalytics(groupId), 500);
+  };
+
+  CF._renderLiveAnalytics = async function(groupId) {
+    const body = document.getElementById('cf-groups-modal_body'), db = window._firebaseDb, { doc, getDoc } = window._firebaseFns || {};
+    if (!body || !db || !getDoc) return;
+    try {
+      const snap = await getDoc(doc(db, 'studyGroups', groupId));
+      if (!snap.exists()) return;
+      const data = snap.data(), myUid = (typeof uid === 'function') ? uid() : 'guest';
+      if (data.adminUid !== myUid) return;
+      const quiz = data.quiz || {}, members = data.members || [], memberNames = data.memberNames || {}, examLabel = (typeof EXAM_CONFIGS !== 'undefined' && EXAM_CONFIGS[data.exam]) ? EXAM_CONFIGS[data.exam].label : data.exam;
+      const quizXP = quiz.xp || {}, answers = quiz.answers || {}, totalQ = (quiz.questions?.length) || 0;
+      const students = {};
+      members.forEach(m => {
+        if (m === data.adminUid) return;
+        const xp = quizXP[m] || 0, qAns = Object.keys(answers).filter(qIdx => answers[qIdx]?.uid === m).length;
+        let correct = 0;
+        Object.keys(answers).forEach(qIdx => { if (answers[qIdx]?.uid === m && answers[qIdx]?.correct) correct++; });
+        students[m] = { name: memberNames[m] || 'Student', xp, qAns, acc: qAns > 0 ? Math.round((correct / qAns) * 100) : 0 };
+      });
+      const sorted = Object.entries(students).map(([uid, data]) => ({ uid, ...data })).sort((a, b) => b.xp - a.xp);
+      const topXP = sorted[0]?.xp || 0, totalAns = sorted.reduce((s, r) => s + r.qAns, 0);
+      const q = (quiz.current || 0) + 1;
+      body.innerHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:12px;"><div><button class="cf-btn cf-btn-ghost" onclick="clearInterval(CF._liveState.poll);CF._openGroupDashboard('${groupId}')">← Back</button><div style="font-size:15px;font-weight:800;color:#fff;margin-top:4px;">${data.name} — Live</div><div style="font-size:11px;color:rgba(200,195,255,0.5);">📚 ${examLabel} · Q ${q}/${totalQ}</div></div><div style="text-align:right;"><span style="color:#4ade80;font-weight:700;">🔴 LIVE</span></div></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:12px;">
+        <div style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#4ade80;">${members.length - 1}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Students</div></div>
+        <div style="background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#a78bfa;">${totalAns}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Answered</div></div>
+        <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#f59e0b;">⚡${topXP}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Top XP</div></div>
+        <div style="background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#2dd4bf;">🟢</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Active</div></div>
+      </div>
+      <div style="font-size:12px;font-weight:800;color:#fff;margin-bottom:6px;">⚡ Leaderboard</div>
+      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:8px;max-height:350px;overflow-y:auto;">
+        ${sorted.map((s, i) => { const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : ''; const pct = topXP > 0 ? Math.round((s.xp / topXP) * 100) : 0; return `<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(108,99,255,0.15);border-radius:8px;padding:8px;margin-bottom:5px;${i === 0 ? 'background:rgba(245,158,11,0.06);border-color:rgba(245,158,11,0.2);' : ''}"><div style="display:flex;gap:8px;margin-bottom:4px;"><div style="font-size:10px;font-weight:800;color:#f59e0b;min-width:20px;">${medal}</div><div style="flex:1;"><div style="font-size:11px;font-weight:800;color:#fff;">${s.name}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">${s.qAns}/${totalQ} · ${s.acc}%</div></div><div style="text-align:right;"><div style="font-size:14px;font-weight:900;color:#f59e0b;">⚡${s.xp}</div></div></div><div style="height:2px;background:rgba(255,255,255,0.05);border-radius:1px;"><div style="height:100%;width:${pct}%;background:#f59e0b;border-radius:1px;transition:width 0.3s;"></div></div></div>`; }).join('')}
+      </div>`;
+    } catch(e) {}
+  };
+
+  // Presence tracking - exits & idle
+  CF._openGroupChat = (function(fn) {
+    return async function(groupId) {
+      const result = await fn.call(this, groupId);
+      const myUid = (typeof uid === 'function') ? uid() : 'guest', db = window._firebaseDb, { doc, updateDoc } = window._firebaseFns || {};
+      window.addEventListener('beforeunload', () => {
+        if (db && updateDoc) updateDoc(doc(db, 'studyGroups', groupId), { ['quiz.participants.' + myUid + '.exitedAt']: Date.now() }).catch(() => {});
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (db && updateDoc) {
+          const status = !document.hidden;
+          updateDoc(doc(db, 'studyGroups', groupId), { ['quiz.participants.' + myUid + '.isActive']: status }).catch(() => {});
+        }
+      });
+      if (db && updateDoc) {
+        setInterval(() => {
+          if (CF._currentGroupId) updateDoc(doc(db, 'studyGroups', CF._currentGroupId), { ['quiz.participants.' + myUid + '.lastHeartbeat']: Date.now() }).catch(() => {});
+        }, 3000);
+      }
+      return result;
+    };
+  })(CF._openGroupChat);
+
+  // Auto-show live dashboard after countdown
+  CF._handleGroupCountdown = (function(fn) {
+    return function(data, groupId) {
+      const result = fn.call(this, data, groupId);
+      const myUid = (typeof uid === 'function') ? uid() : 'guest';
+      if (data.adminUid === myUid) {
+        setTimeout(() => {
+          if (document.getElementById('cf-groups-modal')) CF.openLiveAnalytics(groupId);
+        }, 4000);
+      }
+      return result;
+    };
+  })(CF._handleGroupCountdown);
+
+  /* ─────────────────────────────────────────────────────────────
    * SECTION 15 — INIT
    * ───────────────────────────────────────────────────────────── */
   function init() {
