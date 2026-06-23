@@ -1,5 +1,5 @@
 /**
- * crackai-fixes-patch.js — CrackwithAI v1.0
+ * crackai-fixes-patch.js — CrackwithAI v1.0 [FIXED]
  *
  * Fixes & Enhancements:
  *  1. Group Study Join Bug — users can now join groups and see them immediately
@@ -75,8 +75,10 @@
         // Already a member?
         if (groupData.members && groupData.members.includes(myUid)) {
           if (typeof toast === 'function') toast('✅ You are already in this group!');
-          // Open the group directly
-          window.CF._openGroupChat(groupId);
+          // Open the group directly (GUARDED)
+          if (typeof window.CF._openGroupChat === 'function') {
+            window.CF._openGroupChat(groupId);
+          }
           return;
         }
 
@@ -120,6 +122,11 @@
         // Hide the form
         const form = document.getElementById('cf-group-form');
         if (form) form.innerHTML = '';
+
+        // Open the group chat if available (GUARDED)
+        if (typeof window.CF._openGroupChat === 'function') {
+          window.CF._openGroupChat(groupId);
+        }
 
       } catch (err) {
         console.error('[GroupJoinPatch]', err);
@@ -682,4 +689,4 @@
     setTimeout(applyAll, 100);
   }
 
-})();
+});
