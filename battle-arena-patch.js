@@ -2706,7 +2706,9 @@
           } catch(e) {}
           return '';
         })();
-        await setDoc(doc(db, 'battleLeaderboard', docId), {
+
+        // Build the entry with all required fields
+        const leaderboardEntry = {
           uid: userUid,
           name: finalName,
           xp: totalXP,
@@ -2717,14 +2719,17 @@
           updatedAt: Date.now(),
           photoURL: _lbPhotoURL,
           avatar: _lbAvatar
-        });
+        };
+
+        await setDoc(doc(db, 'battleLeaderboard', docId), leaderboardEntry, { merge: true });
 
         // Also write to all-time leaderboard collection
         try {
           const allTimeRef = doc(db, 'battleLeaderboardAllTime', userUid);
           const allTimeSnap = await getDoc(allTimeRef);
           const at = allTimeSnap.exists() ? allTimeSnap.data() : null;
-          await setDoc(allTimeRef, {
+          
+          const allTimeEntry = {
             uid: userUid,
             name: finalName,
             xp: (at ? at.xp || 0 : 0) + battleXP,
@@ -2734,7 +2739,9 @@
             updatedAt: Date.now(),
             photoURL: _lbPhotoURL,
             avatar: _lbAvatar
-          });
+          };
+
+          await setDoc(allTimeRef, allTimeEntry, { merge: true });
         } catch(atErr) {}
 
         // Check if this user should get weekly free premium
