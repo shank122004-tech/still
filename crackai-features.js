@@ -2012,11 +2012,28 @@ async function _generateQuizQuestions(exam, count, type) {
 
     /* ── Group Battle Room (no chat — pure quiz battle) ── */
     async _openGroupChat(groupId) {
+      if (!groupId) {
+        toast('❌ Group ID missing');
+        return;
+      }
       CF._stopChatPolling();
       CF._stopGroupQuizTimer();
       const db = window._firebaseDb;
-      const { doc, getDoc } = window._firebaseFns;
+      const fns = window._firebaseFns;
+      if (!db || !fns) {
+        toast('❌ Firebase not initialized');
+        return;
+      }
+      const { doc, getDoc } = fns;
+      if (!doc || !getDoc) {
+        toast('❌ Firebase functions unavailable');
+        return;
+      }
       const body = document.getElementById('cf-groups-modal_body');
+      if (!body) {
+        toast('❌ Group chat not ready. Try again.');
+        return;
+      }
       body.innerHTML = `<div class="cf-loading-wrap"><div class="cf-spinner"></div></div>`;
 
       let snap;
@@ -3182,7 +3199,7 @@ async function _generateQuizQuestions(exam, count, type) {
 
   // Presence tracking - exits & idle
   if (typeof CF._openGroupChat === 'function') {
-    CF._openGroupChat = (async function(fn) {
+    CF._openGroupChat = (function(fn) {
       return async function(groupId) {
         const result = await fn.call(this, groupId);
         const myUid = (typeof uid === 'function') ? uid() : 'guest', db = window._firebaseDb, { doc, updateDoc } = window._firebaseFns || {};
@@ -3242,18 +3259,47 @@ async function _generateQuizQuestions(exam, count, type) {
   global._CrackAI = { MockTest, WeakTopics, Analytics, DailyGoal, ScorePredictor, StudyGroups, Referral, XP, EXAM_CONFIGS };
 
   /* Safe wrapper for CF._openGroupChat that handles delayed initialization */
-  global._safeOpenGroupChat = function(groupId) {
-    if (typeof CF !== 'undefined' && typeof CF._openGroupChat === 'function') {
-      CF._openGroupChat(groupId);
-    } else {
-      toast('⏳ Group chat loading...');
-      setTimeout(() => {
-        if (typeof CF !== 'undefined' && typeof CF._openGroupChat === 'function') {
-          CF._openGroupChat(groupId);
-        } else {
-          toast('❌ Could not load group chat');
-        }
-      }, 500);
+  global._safeOpenGroupChat = async function(groupId) {
+    try {
+      console.log('[SafeOpenGroupChat] Starting with groupId:', groupId);
+      
+      // Ensure CF is ready
+      let retries = 0;
+      while ((typeof CF === 'undefined' || typeof CF._openGroupChat !== 'function') && retries < 10) {
+        console.log('[SafeOpenGroupChat] Waiting for CF... retry', retries);
+        await new Promise(r => setTimeout(r, 100));
+        retries++;
+      }
+      
+      console.log('[SafeOpenGroupChat] CF ready after', retries, 'retries. CF type:', typeof CF);
+      
+      if (typeof CF === 'undefined') {
+        console.error('[SafeOpenGroupChat] CF not defined');
+        toast('❌ Application not ready');
+        return;
+      }
+      
+      // Make sure modal is open
+      console.log('[SafeOpenGroupChat] Opening modal...');
+      if (typeof CF.openModal === 'function') {
+        CF.openModal('cf-groups-modal');
+        console.log('[SafeOpenGroupChat] Modal opened');
+      } else {
+        console.warn('[SafeOpenGroupChat] CF.openModal not available');
+      }
+      
+      // Call the actual function
+      console.log('[SafeOpenGroupChat] Calling CF._openGroupChat...');
+      if (typeof CF._openGroupChat === 'function') {
+        await CF._openGroupChat(groupId);
+        console.log('[SafeOpenGroupChat] Success!');
+      } else {
+        console.error('[SafeOpenGroupChat] CF._openGroupChat is not a function. Type:', typeof CF._openGroupChat);
+        toast('❌ Group chat not available');
+      }
+    } catch(err) {
+      console.error('[SafeOpenGroupChat] Exception:', err);
+      toast('❌ Error: ' + (err.message || 'Could not open group'));
     }
   };
 
