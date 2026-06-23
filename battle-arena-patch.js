@@ -1357,7 +1357,14 @@
 
       // Pre-fetch AI questions in background
       _getDemoQuestionsForExam(demoState.examKey).then(
-        qs => { demoState.questions = (qs && Array.isArray(qs) && qs.length > 0) ? qs : Array.from({length: 10}, (_, i) => ({ q: 'Q' + (i+1) + ': Upload questions to Firebase Storage at mock/' + demoState.examKey + '/questions.json', opts: ['Option A', 'Option B', 'Option C', 'Option D'], ans: 0, topic: 'General', exp: 'Upload question bank to gs://rankgpt-f8a64.firebasestorage.app/mock/' + demoState.examKey + '/questions.json' })); },
+        qs => { 
+          demoState.questions = (qs && Array.isArray(qs) && qs.length > 0) ? qs.map(q => ({
+            q: q.q || q.question || '',
+            opts: q.opts || q.options || [],
+            ans: q.ans ?? q.answerIndex ?? q.answer ?? 0,
+            exp: q.exp || q.explanation || ''
+          })) : Array.from({length: 10}, (_, i) => ({ q: 'Q' + (i+1) + ': Upload questions to Firebase Storage at mock/' + demoState.examKey + '/questions.json', opts: ['Option A', 'Option B', 'Option C', 'Option D'], ans: 0, topic: 'General', exp: 'Upload question bank to gs://rankgpt-f8a64.firebasestorage.app/mock/' + demoState.examKey + '/questions.json' })); 
+        },
         err => {
           demoState.questions = Array.from({length: 10}, (_, i) => ({ q: 'Q' + (i+1) + ': Upload questions to Firebase Storage at mock/' + demoState.examKey + '/questions.json', opts: ['Option A', 'Option B', 'Option C', 'Option D'], ans: 0, topic: 'General', exp: 'Upload question bank to gs://rankgpt-f8a64.firebasestorage.app/mock/' + demoState.examKey + '/questions.json' }));
           if (err && err.isMaintenance && typeof window.showMaintenanceOverlay === 'function') {
@@ -1486,10 +1493,13 @@
             <div class="ba-quiz-bar"><div class="ba-quiz-bar-fill" style="width:${(qi/10)*100}%"></div></div>
             <div class="ba-quiz-q-card">
               <div class="ba-quiz-q-label">Question</div>
-              <div class="ba-quiz-q">${q.q}</div>
+              <div class="ba-quiz-q">${q.q || q.question || ''}</div>
             </div>
             <div class="ba-quiz-opts" id="demo-opts">
-              ${(q.opts || ['Option A', 'Option B', 'Option C', 'Option D']).map((o,j) => `<button class="ba-quiz-opt" id="demo-opt-${j}" onclick="BA._demoAnswer('${demoId}',${j})"><span class="ba-opt-letter">${String.fromCharCode(65+j)}</span><span class="ba-opt-text">${o}</span></button>`).join('')}
+              ${(() => {
+                const options = Array.isArray(q?.opts) ? q.opts : Array.isArray(q?.options) ? q.options : ['Option A', 'Option B', 'Option C', 'Option D'];
+                return options.map((o,j) => `<button class="ba-quiz-opt" id="demo-opt-${j}" onclick="BA._demoAnswer('${demoId}',${j})"><span class="ba-opt-letter">${String.fromCharCode(65+j)}</span><span class="ba-opt-text">${o}</span></button>`).join('');
+              })()}
             </div>
             <div id="demo-banner" style="display:none;"></div>
             <div id="demo-exp" style="display:none;" class="ba-quiz-exp"></div>
