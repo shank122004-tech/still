@@ -1856,15 +1856,30 @@ async function _generateQuizQuestions(exam, count, type) {
       const xp = quiz.xp || {};
       const entries = Object.entries(xp).sort((a,b) => b[1]-a[1]);
       if (!entries.length) return '';
-      return `<div class="cf-xp-board">
+      return `<div class="cf-xp-board" style="transition: none;">
         <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;color:rgba(200,195,255,0.5);text-transform:uppercase;margin-bottom:8px">⚡ Live XP Board</div>
         ${entries.map(([u,x],i)=>`
-          <div class="cf-xp-row ${u===uid()?'cf-xp-me':''}">
-            <span class="cf-xp-rank">${['🥇','🥈','🥉'][i]||'#'+(i+1)}</span>
-            <span class="cf-xp-name">${memberNames&&memberNames[u] ? memberNames[u] : (u===uid()?'You':'Player')}</span>
-            <span class="cf-xp-val">${x} XP</span>
+          <div class="cf-xp-row ${u===uid()?'cf-xp-me':''}" style="will-change: transform; transition: all 0.3s ease;">
+            <span class="cf-xp-rank" style="min-width:24px">${['🥇','🥈','🥉'][i]||'#'+(i+1)}</span>
+            <span class="cf-xp-name" style="flex:1">${memberNames&&memberNames[u] ? memberNames[u] : (u===uid()?'You':'Player')}</span>
+            <span class="cf-xp-val" style="font-weight:900;color:#f59e0b;min-width:50px;text-align:right">${x} XP</span>
           </div>`).join('')}
       </div>`;
+    },
+
+    _updateXPDisplay(myUid, newXP) {
+      const xpEl = document.querySelector('.cf-quiz-xp-pill');
+      if (xpEl) {
+        const currentText = xpEl.textContent.trim();
+        const newText = '⚡ ' + newXP + ' XP';
+        if (currentText !== newText) {
+          xpEl.style.opacity = '0.7';
+          xpEl.textContent = newText;
+          setTimeout(() => {
+            xpEl.style.opacity = '1';
+          }, 100);
+        }
+      }
     },
 
     /* Renders the quiz question for the group battle (mock only, with 30s timer) */
@@ -1908,7 +1923,7 @@ async function _generateQuizQuestions(exam, count, type) {
         <div class="cf-quiz-battle-wrap" style="animation:slideIn 0.3s ease;">
           <div class="cf-quiz-progress-row">
             <span class="cf-quiz-qnum">Q ${qi+1} <span style="opacity:0.5;">/ ${quiz.questions.length}</span></span>
-            <span class="cf-quiz-xp-pill" style="background:rgba(108,99,255,0.15);border:1px solid rgba(108,99,255,0.3);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:800;color:#a78bfa;">⚡ ${quiz.xp && quiz.xp[myUid] ? quiz.xp[myUid] : 0} XP</span>
+            <span class="cf-quiz-xp-pill" style="background:rgba(108,99,255,0.15);border:1px solid rgba(108,99,255,0.3);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:800;color:#a78bfa;transition:color 0.2s ease,background 0.2s ease;will-change:contents;">⚡ ${quiz.xp && quiz.xp[myUid] ? quiz.xp[myUid] : 0} XP</span>
           </div>
           <div class="cf-quiz-bar-track"><div class="cf-quiz-bar-fill" style="width:${(qi/quiz.questions.length)*100}%"></div></div>
           <!-- 30s question timer -->
@@ -3073,15 +3088,30 @@ async function _generateQuizQuestions(exam, count, type) {
   CF._renderQuizQuestion = function(quiz, groupId, memberNames) {
     const body = document.getElementById('cf-quiz-area');
     if (!body) return;
-    if (!quiz || !quiz.status) { body.innerHTML = ''; return; }
-    if (quiz.status !== 'active') { body.innerHTML = ''; return; }
-    if (!quiz.questions || quiz.questions.length === 0) { body.innerHTML = '<div style="padding:20px;text-align:center;color:rgba(200,195,255,0.5);">⏳ Loading questions…</div>'; return; }
+    
+    // Hide during any non-active status
+    if (!quiz || !quiz.status || quiz.status === 'countdown' || quiz.status === 'waiting') { 
+      body.innerHTML = '';
+      return; 
+    }
+    
+    // Only show questions when status is exactly 'active'
+    if (quiz.status !== 'active') { 
+      body.innerHTML = '';
+      return; 
+    }
+    
+    if (!quiz.questions || quiz.questions.length === 0) { 
+      body.innerHTML = '<div style="padding:20px;text-align:center;color:rgba(200,195,255,0.5);">⏳ Loading questions…</div>'; 
+      return; 
+    }
+    
     const qi = quiz.current || 0;
     if (qi < 0 || qi >= quiz.questions.length) { body.innerHTML = ''; return; }
     return _origRQQ.call(this, quiz, groupId, memberNames);
   };
 
-  // Optimize polling to 800ms
+  // Optimize polling with longer intervals and better hash tracking
   if (typeof CF._openGroupChat === 'function') {
     const _origOGC = CF._openGroupChat;
     CF._openGroupChat = async function(groupId) {
@@ -3097,28 +3127,49 @@ async function _generateQuizQuestions(exam, count, type) {
               const snap = await getDoc(doc(db, 'studyGroups', CF._currentGroupId));
               if (!snap.exists()) { if (typeof CF._stopChatPolling === 'function') CF._stopChatPolling(); return; }
               const data = snap.data();
-              const newHash = JSON.stringify({ quizStatus: data.quiz?.status, quizQ: data.quiz?.current, quizAnswers: Object.keys(data.quiz?.answers||{}).length, members: (data.members||[]).length });
+              // More detailed hash to detect actual changes
+              const newHash = JSON.stringify({ 
+                quizStatus: data.quiz?.status, 
+                quizQ: data.quiz?.current, 
+                quizAnswers: Object.keys(data.quiz?.answers||{}).length, 
+                members: (data.members||[]).length,
+                xpOnly: data.quiz?.xp ? Object.values(data.quiz.xp).reduce((a,b)=>a+b,0) : 0
+              });
+              
+              // Only update if data actually changed
               if (newHash !== CF._chatPollHash) {
                 CF._chatPollHash = newHash;
                 CF._currentGroupData = data;
+                
+                // Countdown check
                 if (data.quiz?.status === 'countdown' && !CF._groupCountdownShown) {
                   if (typeof CF._handleGroupCountdown === 'function') CF._handleGroupCountdown(data, CF._currentGroupId);
-                } else if (data.quiz?.status === 'active') {
+                } 
+                // Only update questions when status changes to active
+                else if (data.quiz?.status === 'active') {
                   if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
                   if (typeof CF._renderQuizQuestion === 'function') CF._renderQuizQuestion(data.quiz, CF._currentGroupId, data.memberNames);
                   if (typeof CF._startGroupQuizTimer === 'function') CF._startGroupQuizTimer(CF._currentGroupId, data.quiz.current, data.quiz.questionStartedAt);
-                } else if (data.quiz?.status === 'finished') {
+                } 
+                else if (data.quiz?.status === 'finished') {
                   if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
                   if (typeof CF._renderQuizResults === 'function') CF._renderQuizResults(data.quiz, data.memberNames);
-                } else {
-                  if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
+                } 
+                else {
+                  // Waiting room or countdown - don't show questions
                   if (typeof CF._renderGroupWaitingRoom === 'function') CF._renderGroupWaitingRoom(data, CF._currentGroupId, data.adminUid === (typeof uid === 'function' ? uid() : 'guest'));
                   const qa = document.getElementById('cf-quiz-area');
                   if (qa) qa.innerHTML = '';
                 }
+              } else {
+                // Hash unchanged but check for XP updates and smooth update without full re-render
+                const myUid = (typeof uid === 'function' ? uid() : 'guest');
+                if (data.quiz?.xp && data.quiz?.xp[myUid] !== undefined) {
+                  CF._updateXPDisplay(myUid, data.quiz.xp[myUid]);
+                }
               }
             } catch(e) {}
-          }, 1500);
+          }, 2000); // Increased to 2000ms to reduce re-renders
         }
       }, 100);
       return result;
