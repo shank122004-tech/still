@@ -1945,24 +1945,67 @@ async function _generateQuizQuestions(exam, count, type) {
       const body = document.getElementById('cf-quiz-area');
       if (!body) return;
       const xp = quiz.xp || {};
-      const sorted = Object.entries(xp).sort((a,b)=>b[1]-a[1]);
-      const winner = sorted[0];
+      const scores = quiz.scores || {};
+      const answers = quiz.answers || {};
+      const totalQ = (quiz.questions || []).length;
       const myUid = uid();
+
+      // Build per-player stats: merge xp + scores + answers
+      const playerMap = {};
+      // From xp keys
+      Object.keys(xp).forEach(u => {
+        if (!playerMap[u]) playerMap[u] = { xp: 0, correct: 0, wrong: 0, total: 0 };
+        playerMap[u].xp = xp[u];
+      });
+      // From scores (most accurate)
+      Object.keys(scores).forEach(u => {
+        if (!playerMap[u]) playerMap[u] = { xp: xp[u] || 0, correct: 0, wrong: 0, total: 0 };
+        playerMap[u].correct = scores[u].correct || 0;
+        playerMap[u].wrong = scores[u].wrong || 0;
+        playerMap[u].total = scores[u].total || 0;
+      });
+      // Fallback: derive from answers if scores not populated
+      if (!Object.keys(scores).length) {
+        Object.keys(answers).forEach(qIdx => {
+          const a = answers[qIdx];
+          if (!a || !a.uid) return;
+          if (!playerMap[a.uid]) playerMap[a.uid] = { xp: xp[a.uid] || 0, correct: 0, wrong: 0, total: 0 };
+          playerMap[a.uid].total++;
+          if (a.correct) playerMap[a.uid].correct++;
+          else playerMap[a.uid].wrong++;
+        });
+      }
+
+      const sorted = Object.entries(playerMap).sort((a,b) => b[1].xp - a[1].xp);
+      const winner = sorted[0];
+      const medals = ['🥇','🥈','🥉'];
+
       body.innerHTML = `
-        <div style="text-align:center;padding:20px 0 10px">
-          <div style="font-size:52px">${winner && winner[0]===myUid ? '🏆' : '🎯'}</div>
-          <h2 style="margin:8px 0;font-size:20px;background:linear-gradient(135deg,#f59e0b,#FF6B9D);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Quiz Over!</h2>
-          ${winner ? `<div style="font-size:14px;color:rgba(200,195,255,0.7);margin-bottom:16px">🥇 Winner: <strong style="color:#f59e0b">${memberNames&&memberNames[winner[0]]?memberNames[winner[0]]:'Someone'}</strong> with ${winner[1]} XP</div>` : ''}
+        <div style="text-align:center;padding:16px 0 10px">
+          <div style="font-size:48px">${winner && winner[0]===myUid ? '🏆' : '🎯'}</div>
+          <h2 style="margin:6px 0;font-size:19px;background:linear-gradient(135deg,#f59e0b,#FF6B9D);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">Battle Over!</h2>
+          ${winner ? `<div style="font-size:13px;color:rgba(200,195,255,0.7);margin-bottom:12px">🥇 Winner: <strong style="color:#f59e0b">${memberNames&&memberNames[winner[0]]?memberNames[winner[0]]:(winner[0]===myUid?'You':'Player')}</strong> · ${winner[1].xp} XP · ${winner[1].correct}/${totalQ} correct</div>` : ''}
         </div>
-        <div class="cf-results-grid" style="margin:0 0 16px">
-          ${sorted.map(([u,x],i)=>`
-            <div class="cf-result-stat" style="--rc:${i===0?'#f59e0b':i===1?'#94a3b8':i===2?'#f59e0b':'#6C63FF'}">
-              <div>${['🥇','🥈','🥉'][i]||'#'+(i+1)} ${x}</div>
-              <span>${memberNames&&memberNames[u]?memberNames[u]:(u===myUid?'You':'Player')}</span>
-            </div>`).join('')}
+        <div style="display:flex;flex-direction:column;gap:7px;margin:0 0 14px">
+          ${sorted.map(([u,s],i) => {
+            const name = memberNames&&memberNames[u] ? memberNames[u] : (u===myUid?'You':'Player');
+            const acc = s.total > 0 ? Math.round((s.correct/s.total)*100) : 0;
+            const isMe = u === myUid;
+            return `<div style="display:flex;align-items:center;gap:10px;background:${isMe?'rgba(108,99,255,0.12)':'rgba(255,255,255,0.03)'};border:1px solid ${isMe?'rgba(108,99,255,0.35)':'rgba(255,255,255,0.07)'};border-radius:10px;padding:9px 12px;">
+              <span style="font-size:18px;min-width:22px">${medals[i]||('#'+(i+1))}</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}${isMe?' <span style="font-size:10px;color:#a78bfa">(You)</span>':''}</div>
+                <div style="font-size:11px;color:rgba(200,195,255,0.5);margin-top:2px">✅ ${s.correct} correct · ❌ ${s.wrong} wrong · ${acc}% acc</div>
+              </div>
+              <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:15px;font-weight:800;color:#f59e0b">⚡${s.xp}</div>
+                <div style="font-size:10px;color:rgba(200,195,255,0.4)">${s.total}/${totalQ} ans</div>
+              </div>
+            </div>`;
+          }).join('')}
         </div>
         <div style="text-align:center">
-          <button class="cf-btn cf-btn-ghost" onclick="document.getElementById('cf-quiz-area').innerHTML=''">✕ Close Results</button>
+          <button class="cf-btn cf-btn-ghost" onclick="document.getElementById('cf-quiz-area').innerHTML=''">✕ Close</button>
         </div>`;
     },
 
@@ -2015,10 +2058,11 @@ async function _generateQuizQuestions(exam, count, type) {
         else if (g.quiz.status === 'finished') CF._renderQuizResults(g.quiz, g.memberNames);
       }
 
-      // Poll every 1.5s for active battle, 3s otherwise
+      // Poll every 2s — skip entirely during answer animation
       CF._chatPollHash = JSON.stringify({ quizStatus: g.quiz?.status, quizQ: g.quiz?.current, quizAnswers: Object.keys(g.quiz?.answers||{}).length, members: memberCount });
       CF._chatPollInterval = setInterval(async () => {
         if (!CF._currentGroupId) return;
+        if (CF._answerAnimating) return; // never fight the answer animation
         try {
           const s = await getDoc(doc(db, 'studyGroups', CF._currentGroupId));
           if (!s.exists()) { CF._stopChatPolling(); return; }
@@ -2044,7 +2088,7 @@ async function _generateQuizQuestions(exam, count, type) {
             }
           }
         } catch(e) {}
-      }, 1500);
+      }, 2000);
     },
 
     /* ── Waiting Room — shows members joined, waiting for admin to start ── */
@@ -2246,8 +2290,10 @@ async function _generateQuizQuestions(exam, count, type) {
       const g = CF._currentGroupData;
       if (!g || !g.quiz) return;
       if (g.quiz.answers && g.quiz.answers[qIdx]) return; // already answered
+      if (CF._answerAnimating) return; // prevent double-tap during animation
 
       CF._stopGroupQuizTimer();
+      CF._answerAnimating = true;
 
       const myUid = uid();
       const myName = getMyName();
@@ -2259,54 +2305,66 @@ async function _generateQuizQuestions(exam, count, type) {
       const currentXP = (g.quiz.xp && g.quiz.xp[myUid]) || 0;
       const newXP = Math.max(0, currentXP + xpEarned);
 
-      // ── OPTIMISTIC UPDATE ──
+      // ── OPTIMISTIC UPDATE — render immediately, NO Firestore read ──
       const optimisticQuiz = JSON.parse(JSON.stringify(g.quiz));
       optimisticQuiz.answers = optimisticQuiz.answers || {};
       optimisticQuiz.answers[qIdx] = { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() };
       optimisticQuiz.xp = optimisticQuiz.xp || {};
       optimisticQuiz.xp[myUid] = newXP;
+      // Per-player score tracking for accurate admin leaderboard
+      optimisticQuiz.scores = optimisticQuiz.scores || {};
+      if (!optimisticQuiz.scores[myUid]) optimisticQuiz.scores[myUid] = { correct: 0, wrong: 0, total: 0 };
+      optimisticQuiz.scores[myUid].total = (optimisticQuiz.scores[myUid].total || 0) + 1;
+      if (correct) optimisticQuiz.scores[myUid].correct = (optimisticQuiz.scores[myUid].correct || 0) + 1;
+      else optimisticQuiz.scores[myUid].wrong = (optimisticQuiz.scores[myUid].wrong || 0) + 1;
       optimisticQuiz.current = isLast ? qIdx : nextIdx;
       optimisticQuiz.status = isLast ? 'finished' : 'active';
       optimisticQuiz.questionStartedAt = isLast ? (g.quiz.questionStartedAt || Date.now()) : Date.now();
 
       CF._currentGroupData = { ...g, quiz: optimisticQuiz };
-      CF._renderQuizQuestion(optimisticQuiz, groupId, g.memberNames);
-      if (correct) { toast('✅ Correct! +10 XP 🔥', 1800); if (typeof XP !== 'undefined') XP.add(10); }
-      else { toast('❌ Wrong! -3 XP', 1800); }
 
-      // ── BACKGROUND SYNC ──
+      // Render answer feedback immediately
+      CF._renderQuizQuestion(optimisticQuiz, groupId, g.memberNames);
+      if (correct) { toast('✅ Correct! +10 XP 🔥', 1500); if (typeof XP !== 'undefined') XP.add(10); }
+      else { toast('❌ Wrong! -3 XP', 1500); }
+
+      // Pre-set poll hash so poller won't re-render and fight the animation
+      CF._chatPollHash = JSON.stringify({
+        quizStatus: optimisticQuiz.status,
+        quizQ: optimisticQuiz.current,
+        quizAnswers: Object.keys(optimisticQuiz.answers).length,
+        members: (g.members || []).length
+      });
+
+      // After 1.5s show next question or results
+      if (isLast) {
+        setTimeout(function() {
+          CF._answerAnimating = false;
+          CF._renderQuizResults(optimisticQuiz, g.memberNames);
+        }, 1500);
+      } else {
+        setTimeout(function() {
+          CF._answerAnimating = false;
+          const latest = CF._currentGroupData && CF._currentGroupData.quiz;
+          CF._renderQuizQuestion(latest || optimisticQuiz, groupId, (CF._currentGroupData || g).memberNames);
+          CF._startGroupQuizTimer(groupId, (latest || optimisticQuiz).current, (latest || optimisticQuiz).questionStartedAt);
+        }, 1500);
+      }
+
+      // ── BACKGROUND SYNC — fire-and-forget, NO follow-up getDoc ──
       try {
         const db = window._firebaseDb;
         const { doc, updateDoc } = window._firebaseFns;
-        const updates = {
+        await updateDoc(doc(db, 'studyGroups', groupId), {
           ['quiz.answers.' + qIdx]: { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
           ['quiz.xp.' + myUid]: newXP,
+          ['quiz.scores.' + myUid + '.correct']: optimisticQuiz.scores[myUid].correct,
+          ['quiz.scores.' + myUid + '.wrong']: optimisticQuiz.scores[myUid].wrong,
+          ['quiz.scores.' + myUid + '.total']: optimisticQuiz.scores[myUid].total,
           ['quiz.current']: isLast ? qIdx : nextIdx,
           ['quiz.status']: isLast ? 'finished' : 'active',
           ['quiz.questionStartedAt']: isLast ? (g.quiz.questionStartedAt || Date.now()) : Date.now(),
-        };
-        await updateDoc(doc(db, 'studyGroups', groupId), updates);
-
-        // Update dashboard XP stats
-        const { getDoc } = window._firebaseFns;
-        const snap = await getDoc(doc(db, 'studyGroups', groupId));
-        if (snap && snap.exists()) {
-          const data = snap.data();
-          CF._currentGroupData = data;
-          CF._renderQuizQuestion(data.quiz, groupId, data.memberNames);
-          CF._chatPollHash = JSON.stringify({ quizStatus: data.quiz?.status, quizQ: data.quiz?.current, quizAnswers: Object.keys(data.quiz?.answers||{}).length, members: (data.members||[]).length });
-          // Save battle XP to memberStats for dashboard tracking
-          if (newXP > 0) {
-            try {
-              await updateDoc(doc(db, 'studyGroups', groupId), {
-                ['memberStats.' + myUid + '.battleXP']: newXP,
-                ['memberStats.' + myUid + '.questionsAnswered']: (data.memberStats?.[myUid]?.questionsAnswered || 0) + 1,
-                ['memberStats.' + myUid + '.lastActive']: Date.now(),
-                ['memberNames.' + myUid]: myName,
-              });
-            } catch(e) {}
-          }
-        }
+        });
       } catch(e) {}
     },
 
@@ -2991,6 +3049,7 @@ async function _generateQuizQuestions(exam, count, type) {
       if (db && getDoc) {
         CF._chatPollInterval = setInterval(async () => {
           if (!CF._currentGroupId) return;
+          if (CF._answerAnimating) return; // never fight the answer animation
           try {
             const snap = await getDoc(doc(db, 'studyGroups', CF._currentGroupId));
             if (!snap.exists()) { if (typeof CF._stopChatPolling === 'function') CF._stopChatPolling(); return; }
@@ -3016,7 +3075,7 @@ async function _generateQuizQuestions(exam, count, type) {
               }
             }
           } catch(e) {}
-        }, 800);
+        }, 1500);
       }
     }, 100);
     return result;
@@ -3030,7 +3089,7 @@ async function _generateQuizQuestions(exam, count, type) {
     if (CF._liveState && CF._liveState.poll) clearInterval(CF._liveState.poll);
     if (!CF._liveState) CF._liveState = {};
     CF._renderLiveAnalytics(groupId);
-    CF._liveState.poll = setInterval(() => CF._renderLiveAnalytics(groupId), 500);
+    CF._liveState.poll = setInterval(() => CF._renderLiveAnalytics(groupId), 2000);
   };
 
   CF._renderLiveAnalytics = async function(groupId) {
@@ -3041,35 +3100,85 @@ async function _generateQuizQuestions(exam, count, type) {
       if (!snap.exists()) return;
       const data = snap.data(), myUid = (typeof uid === 'function') ? uid() : 'guest';
       if (data.adminUid !== myUid) return;
-      const quiz = data.quiz || {}, members = data.members || [], memberNames = data.memberNames || {}, examLabel = (typeof EXAM_CONFIGS !== 'undefined' && EXAM_CONFIGS[data.exam]) ? EXAM_CONFIGS[data.exam].label : data.exam;
-      const quizXP = quiz.xp || {}, answers = quiz.answers || {}, totalQ = (quiz.questions?.length) || 0;
+      const quiz = data.quiz || {}, members = data.members || [], memberNames = data.memberNames || {};
+      const examLabel = (typeof EXAM_CONFIGS !== 'undefined' && EXAM_CONFIGS[data.exam]) ? EXAM_CONFIGS[data.exam].label : (data.exam || '');
+      const quizXP = quiz.xp || {}, answers = quiz.answers || {}, scores = quiz.scores || {}, totalQ = (quiz.questions || []).length;
+      const currentQ = (quiz.current || 0) + 1;
+      const isFinished = quiz.status === 'finished';
+
+      // Build per-student stats — prefer quiz.scores (most accurate), fallback to answers
       const students = {};
       members.forEach(m => {
         if (m === data.adminUid) return;
-        const xp = quizXP[m] || 0, qAns = Object.keys(answers).filter(qIdx => answers[qIdx]?.uid === m).length;
-        let correct = 0;
-        Object.keys(answers).forEach(qIdx => { if (answers[qIdx]?.uid === m && answers[qIdx]?.correct) correct++; });
-        students[m] = { name: memberNames[m] || 'Student', xp, qAns, acc: qAns > 0 ? Math.round((correct / qAns) * 100) : 0 };
+        const xp = quizXP[m] || 0;
+        let correct = 0, wrong = 0, total = 0;
+        if (scores[m]) {
+          correct = scores[m].correct || 0;
+          wrong = scores[m].wrong || 0;
+          total = scores[m].total || 0;
+        } else {
+          // Fallback: derive from answers
+          Object.keys(answers).forEach(qIdx => {
+            const a = answers[qIdx];
+            if (!a || a.uid !== m) return;
+            total++;
+            if (a.correct) correct++; else wrong++;
+          });
+        }
+        const acc = total > 0 ? Math.round((correct / total) * 100) : 0;
+        students[m] = { name: memberNames[m] || 'Student', xp, correct, wrong, total, acc };
       });
-      const sorted = Object.entries(students).map(([uid, data]) => ({ uid, ...data })).sort((a, b) => b.xp - a.xp);
-      const topXP = sorted[0]?.xp || 0, totalAns = sorted.reduce((s, r) => s + r.qAns, 0);
-      const q = (quiz.current || 0) + 1;
-      body.innerHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:12px;"><div><button class="cf-btn cf-btn-ghost" onclick="clearInterval(CF._liveState.poll);CF._openGroupDashboard('${groupId}')">← Back</button><div style="font-size:15px;font-weight:800;color:#fff;margin-top:4px;">${data.name} — Live</div><div style="font-size:11px;color:rgba(200,195,255,0.5);">📚 ${examLabel} · Q ${q}/${totalQ}</div></div><div style="text-align:right;"><span style="color:#4ade80;font-weight:700;">🔴 LIVE</span></div></div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:12px;">
-        <div style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#4ade80;">${members.length - 1}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Students</div></div>
-        <div style="background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#a78bfa;">${totalAns}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Answered</div></div>
-        <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#f59e0b;">⚡${topXP}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Top XP</div></div>
-        <div style="background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#2dd4bf;">🟢</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Active</div></div>
-      </div>
-      <div style="font-size:12px;font-weight:800;color:#fff;margin-bottom:6px;">⚡ Leaderboard</div>
-      <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:8px;max-height:350px;overflow-y:auto;">
-        ${sorted.map((s, i) => { const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : ''; const pct = topXP > 0 ? Math.round((s.xp / topXP) * 100) : 0; return `<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(108,99,255,0.15);border-radius:8px;padding:8px;margin-bottom:5px;${i === 0 ? 'background:rgba(245,158,11,0.06);border-color:rgba(245,158,11,0.2);' : ''}"><div style="display:flex;gap:8px;margin-bottom:4px;"><div style="font-size:10px;font-weight:800;color:#f59e0b;min-width:20px;">${medal}</div><div style="flex:1;"><div style="font-size:11px;font-weight:800;color:#fff;">${s.name}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">${s.qAns}/${totalQ} · ${s.acc}%</div></div><div style="text-align:right;"><div style="font-size:14px;font-weight:900;color:#f59e0b;">⚡${s.xp}</div></div></div><div style="height:2px;background:rgba(255,255,255,0.05);border-radius:1px;"><div style="height:100%;width:${pct}%;background:#f59e0b;border-radius:1px;transition:width 0.3s;"></div></div></div>`; }).join('')}
-      </div>`;
+
+      const sorted = Object.entries(students).sort((a, b) => b[1].xp - a[1].xp);
+      const topXP = sorted[0]?.[1].xp || 0;
+      const totalAns = sorted.reduce((s, r) => s + r[1].total, 0);
+      const medals = ['🥇','🥈','🥉'];
+
+      body.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+          <div>
+            <button class="cf-btn cf-btn-ghost" onclick="clearInterval(CF._liveState&&CF._liveState.poll);CF._openGroupDashboard('${groupId}')">← Back</button>
+            <div style="font-size:15px;font-weight:800;color:#fff;margin-top:4px;">${data.name}</div>
+            <div style="font-size:11px;color:rgba(200,195,255,0.5);">📚 ${examLabel} · Q ${currentQ}/${totalQ} · ${isFinished?'<span style="color:#4ade80">✅ Finished</span>':'<span style="color:#f59e0b">⚔️ Battle Live</span>'}</div>
+          </div>
+          <span style="color:#ef4444;font-weight:700;font-size:12px;">${isFinished?'':'🔴 LIVE'}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:12px;">
+          <div style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#4ade80;">${sorted.length}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Students</div></div>
+          <div style="background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#a78bfa;">${totalAns}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Answered</div></div>
+          <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#f59e0b;">⚡${topXP}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Top XP</div></div>
+          <div style="background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:9px;padding:8px;text-align:center;"><div style="font-size:18px;font-weight:800;color:#2dd4bf;">${currentQ}/${totalQ}</div><div style="font-size:9px;color:rgba(200,195,255,0.4);">Progress</div></div>
+        </div>
+        <div style="font-size:12px;font-weight:800;color:#fff;margin-bottom:6px;">📊 Live Scoreboard</div>
+        <div style="display:flex;flex-direction:column;gap:6px;max-height:380px;overflow-y:auto;">
+          ${sorted.length === 0 ? '<div style="text-align:center;padding:20px;color:rgba(200,195,255,0.4);font-size:13px;">No students have answered yet…</div>' :
+            sorted.map(([u, s], i) => {
+              const pct = topXP > 0 ? Math.round((s.xp / topXP) * 100) : 0;
+              return `<div style="background:${i===0?'rgba(245,158,11,0.07)':'rgba(255,255,255,0.02)'};border:1px solid ${i===0?'rgba(245,158,11,0.25)':'rgba(108,99,255,0.12)'};border-radius:9px;padding:9px 11px;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+                  <span style="font-size:16px;min-width:20px">${medals[i]||('#'+(i+1))}</span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.name}</div>
+                    <div style="font-size:10px;color:rgba(200,195,255,0.45);">✅ ${s.correct} · ❌ ${s.wrong} · ${s.acc}% acc · ${s.total}/${totalQ} done</div>
+                  </div>
+                  <div style="text-align:right;flex-shrink:0">
+                    <div style="font-size:15px;font-weight:900;color:#f59e0b">⚡${s.xp}</div>
+                  </div>
+                </div>
+                <div style="height:3px;background:rgba(255,255,255,0.05);border-radius:2px;overflow:hidden;">
+                  <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#6C63FF,#f59e0b);border-radius:2px;transition:width 0.4s ease;"></div>
+                </div>
+              </div>`;
+            }).join('')}
+        </div>
+        ${!isFinished ? `<div style="margin-top:10px;text-align:center;">
+          <button class="cf-btn cf-btn-danger" style="font-size:12px;padding:7px 16px;" onclick="CF._endBattle&&CF._endBattle('${groupId}')">🛑 End Battle for All</button>
+        </div>` : ''}`;
     } catch(e) {}
   };
 
   // Presence tracking - exits & idle
-  CF._openGroupChat = (function(fn) {
+  CF._openGroupChat = (async function(fn) {
     return async function(groupId) {
       const result = await fn.call(this, groupId);
       const myUid = (typeof uid === 'function') ? uid() : 'guest', db = window._firebaseDb, { doc, updateDoc } = window._firebaseFns || {};
