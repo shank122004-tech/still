@@ -1060,6 +1060,7 @@ function _stopSessionWatch() {
 
 // Checks whether another device already holds this account's session.
 // If so, asks the person before taking over; otherwise claims it right away.
+// ALSO: checks if the other session is STALE (>1hr old) and auto-claims if it is.
 async function _claimSession(fbUser) {
   if (!window._firebaseDb || !window._firebaseFns || !fbUser) return;
   try {
@@ -1068,13 +1069,25 @@ async function _claimSession(fbUser) {
     const userRef = doc(window._firebaseDb, 'users', fbUser.uid);
 
     const snap = await getDoc(userRef).catch(() => null);
-    const existingSid = snap && snap.exists() ? snap.data().activeSessionId : null;
+    const userData = snap && snap.exists() ? snap.data() : null;
+    const existingSid = userData ? userData.activeSessionId : null;
+    const existingSessionAt = userData ? userData.activeSessionAt : null;
 
     if (existingSid) {
-      // Another device currently holds the session — ask before taking over
-      _pendingSessionUser = fbUser;
-      const m = document.getElementById('sessionConflictModal');
-      if (m) m.classList.add('active');
+      // Check if the existing session is STALE (older than 1 hour = 3600000ms)
+      const SESSION_TIMEOUT = 3600000; // 1 hour
+      const now = Date.now();
+      const isStale = !existingSessionAt || (now - existingSessionAt > SESSION_TIMEOUT);
+      
+      if (isStale) {
+        // ✓ Old session is stale — automatically claim
+        await _doClaimSession(fbUser);
+      } else {
+        // ⚠️ Fresh session on another device — ask user
+        _pendingSessionUser = fbUser;
+        const m = document.getElementById('sessionConflictModal');
+        if (m) m.classList.add('active');
+      }
       return;
     }
     await _doClaimSession(fbUser);
