@@ -1597,11 +1597,26 @@
               xp: xp || 0,
               battles: Math.floor(Math.random() * 12) + 1,
               wins: Math.floor(Math.random() * 5),
+              coins: 0,
               weekKey: wk,
               _demo: true
             }));
           const merged = [...existing, ...newEntries].slice(-30); // keep last 30 demo entries
           localStorage.setItem(demoLbKey, JSON.stringify(merged));
+          
+          // Also save demo users to Firestore leaderboard
+          if (window._firebaseDb && window._firebaseFns) {
+            try {
+              const db = window._firebaseDb;
+              const { doc, setDoc } = window._firebaseFns;
+              newEntries.forEach(entry => {
+                const docId = wk + '_' + entry.uid;
+                setDoc(doc(db, 'battleLeaderboard', docId), entry, { merge: true }).catch(e => {});
+                // Also save to all-time
+                setDoc(doc(db, 'battleLeaderboardAllTime', entry.uid), entry, { merge: true }).catch(e => {});
+              });
+            } catch(fbErr) {}
+          }
         } catch(ex) {}
 
         const winnerEntry = sorted[0];
@@ -2789,10 +2804,16 @@
         // Merge my local XP if not in list
         const myInList = weeklyEntries.find(e => e.uid === myUid);
         if (!myInList && myBattleXP > 0) {
-          weeklyEntries.push({ uid: myUid, name: getMyName(), xp: myBattleXP, battles: 1, wins: 0, weekKey, _local: true });
+          weeklyEntries.push({ uid: myUid, name: getMyName(), xp: myBattleXP, battles: 1, wins: 0, coins: 0, weekKey, _local: true });
         }
 
-        // Demo bot entries excluded -- rank must reflect real players only
+        // Load demo bot entries from localStorage and merge
+        try {
+          const demoLbKey = 'sscai_demo_lb_entries';
+          const demoEntries = JSON.parse(localStorage.getItem(demoLbKey) || '[]');
+          const demoForThisWeek = demoEntries.filter(e => e.weekKey === weekKey);
+          weeklyEntries = [...weeklyEntries, ...demoForThisWeek];
+        } catch(ex) {}
 
         weeklyEntries.sort((a,b) => {
           // Sort by wins first (descending), then coins, then XP
@@ -2915,13 +2936,14 @@
           const isDemo = e._demo === true;
           const wins = e.wins || 0;
           const coins = e.coins || 0;
+          const demoLabel = isDemo ? '<span style="font-size:9px;background:rgba(100,100,100,0.4);color:#999;padding:2px 6px;border-radius:8px;margin-left:6px;">🤖 Demo</span>' : '';
 
           html += `
-            <div class="lb-row ${isMe?'me':''} ${rank<=3?'top3':''}">
+            <div class="lb-row ${isMe?'me':''} ${rank<=3?'top3':''} ${isDemo?'demo-entry':''}">
               <div class="lb-rank">${rankEmoji}</div>
               ${avatarHtml}
               <div class="lb-info">
-                <div class="lb-name">${e.name||'Student'} ${isMe?'<span style="font-size:10px;background:rgba(108,99,255,0.2);color:#a78bfa;padding:1px 6px;border-radius:10px;">You</span>':''}</div>
+                <div class="lb-name">${e.name||'Student'} ${isMe?'<span style="font-size:10px;background:rgba(108,99,255,0.2);color:#a78bfa;padding:1px 6px;border-radius:10px;">You</span>':''}${demoLabel}</div>
                 <div class="lb-level" style="color:${levelData.color};">${levelData.emoji} Lv.${level} ${levelData.title}</div>
               </div>
               <div class="lb-stats-col" style="display:flex;gap:16px;text-align:center;">
@@ -2978,6 +3000,14 @@
           const snap2 = await getDocs(collection(db, 'battleLeaderboardAllTime'));
           entries = snap2.docs.map(d => d.data());
         }
+        
+        // Load demo bot entries from localStorage and merge
+        try {
+          const demoLbKey = 'sscai_demo_lb_entries';
+          const demoEntries = JSON.parse(localStorage.getItem(demoLbKey) || '[]');
+          entries = [...entries, ...demoEntries];
+        } catch(ex) {}
+        
         // Sort by wins first, then coins, then XP
         entries.sort((a, b) => {
           if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
