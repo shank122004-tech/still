@@ -2663,14 +2663,19 @@
         const battles = (existing?.battles || 0) + 1;
         const wins = existing?.wins || 0;
         
-        // Ensure name is never empty - try multiple sources
+        // CRITICAL: Ensure name is ALWAYS set from most reliable source
         let finalName = 'Student';
+        
+        // 1st priority: Use provided userName (from getMyName())
         if (userName && userName.trim()) {
           finalName = userName.trim();
-        } else if (existing?.name && existing.name !== 'Student') {
-          finalName = existing.name;
-        } else {
-          // Try to get from Firebase auth
+        }
+        // 2nd priority: Keep existing name if it's good
+        else if (existing?.name && existing.name.trim() && existing.name !== 'Student') {
+          finalName = existing.name.trim();
+        }
+        // 3rd priority: Get from current Firebase auth
+        else {
           try {
             const cu = window._firebaseAuth?.currentUser;
             if (cu && cu.uid === userUid) {
@@ -2707,7 +2712,7 @@
           return '';
         })();
 
-        // Build the entry with all required fields
+        // Build the entry with all required fields - name is ALWAYS included
         const leaderboardEntry = {
           uid: userUid,
           name: finalName,
@@ -2723,7 +2728,7 @@
 
         await setDoc(doc(db, 'battleLeaderboard', docId), leaderboardEntry, { merge: true });
 
-        // Also write to all-time leaderboard collection
+        // Also write to all-time leaderboard collection with same name
         try {
           const allTimeRef = doc(db, 'battleLeaderboardAllTime', userUid);
           const allTimeSnap = await getDoc(allTimeRef);
@@ -2871,26 +2876,13 @@
         } catch(ex) {}
 
         weeklyEntries.sort((a,b) => {
-          // Sort by wins first (descending), then coins, then XP
+          // Sort by XP first (descending) - highest XP at top
+          if ((b.xp || 0) !== (a.xp || 0)) return (b.xp || 0) - (a.xp || 0);
+          // Then by wins (descending)
           if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
-          if ((b.coins || 0) !== (a.coins || 0)) return (b.coins || 0) - (a.coins || 0);
-          return (b.xp || 0) - (a.xp || 0);
+          // Then by coins (descending)
+          return (b.coins || 0) - (a.coins || 0);
         });
-
-        // Ensure all entries have names - fill in missing names from auth
-        if (window._firebaseAuth && window._firebaseAuth.currentUser) {
-          const myUid = window._firebaseAuth.currentUser.uid;
-          weeklyEntries = weeklyEntries.map(entry => {
-            if (!entry.name || entry.name === 'Student') {
-              if (entry.uid === myUid && entry.uid !== 'guest') {
-                const cu = window._firebaseAuth.currentUser;
-                const displayName = cu?.displayName || cu?.email?.split('@')[0] || 'Student';
-                entry.name = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-              }
-            }
-            return entry;
-          });
-        }
 
         this._renderLbContent(body, weeklyEntries, weekKey, myUid);
 
@@ -3071,28 +3063,12 @@
           entries = [...entries, ...demoEntries];
         } catch(ex) {}
         
-        // Sort by wins first, then coins, then XP
+        // Sort by XP first (descending) - highest XP at top, then wins, then coins
         entries.sort((a, b) => {
+          if ((b.xp || 0) !== (a.xp || 0)) return (b.xp || 0) - (a.xp || 0);
           if ((b.wins || 0) !== (a.wins || 0)) return (b.wins || 0) - (a.wins || 0);
-          if ((b.coins || 0) !== (a.coins || 0)) return (b.coins || 0) - (a.coins || 0);
-          return (b.xp || 0) - (a.xp || 0);
+          return (b.coins || 0) - (a.coins || 0);
         });
-
-        // Ensure all entries have names - fill in missing names from auth
-        if (window._firebaseAuth && window._firebaseAuth.currentUser) {
-          const myUid = window._firebaseAuth.currentUser.uid;
-          entries = entries.map(entry => {
-            if (!entry.name || entry.name === 'Student') {
-              if (entry.uid === myUid && entry.uid !== 'guest') {
-                const cu = window._firebaseAuth.currentUser;
-                const displayName = cu?.displayName || cu?.email?.split('@')[0] || 'Student';
-                entry.name = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-              }
-            }
-            return entry;
-          });
-        }
-
         entries = entries.slice(0, 50);
         this._renderLbContent(body, entries, null, myUid);
       } catch(e) {
