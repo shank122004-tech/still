@@ -56,126 +56,54 @@
 
       CF._chatPollInterval = setInterval(async function () {
         if (!CF._currentGroupId) return;
-        // Don't fight the answer animation
-        if (CF._answerAnimating) return;
+        if (CF._answerAnimating) return; // never fight the answer animation
 
         try {
           var s = await fns.getDoc(fns.doc(db, 'studyGroups', CF._currentGroupId));
-          if (!s.exists()) { CF._stopChatPolling(); return; }
+          if (!s.exists()) { CF._stopChatPolling && CF._stopChatPolling(); return; }
           var data = s.data();
 
           var newHash = JSON.stringify({
-            msgs: (data.messages || []).length,
-            quiz: data.quiz ? data.quiz.current : null,
-            qstatus: data.quiz ? data.quiz.status : null,
-            qanswers: data.quiz ? Object.keys(data.quiz.answers || {}).length : 0
+            quizStatus: data.quiz ? data.quiz.status : null,
+            quizQ: data.quiz ? data.quiz.current : null,
+            quizAnswers: data.quiz ? Object.keys(data.quiz.answers || {}).length : 0,
+            members: (data.members || []).length
           });
 
           if (newHash !== CF._chatPollHash) {
             CF._chatPollHash = newHash;
             CF._currentGroupData = data;
 
-            // Re-render chat messages
-            CF._renderChatMessages(data.messages || []);
-
-            // Re-render quiz area (only if not animating — double-checked here)
-            if (!CF._answerAnimating) {
-              var status = data.quiz ? data.quiz.status : null;
-              if (status === 'active') {
-                CF._renderQuizQuestion(data.quiz, CF._currentGroupId, data.memberNames);
-              } else if (status === 'finished') {
-                CF._renderQuizResults(data.quiz, data.memberNames);
-              } else if (status === 'abandoned') {
-                // Admin ended the battle — clear the quiz area for everyone
-                var qa = document.getElementById('cf-quiz-area');
-                if (qa) {
-                  qa.innerHTML = '<div style="text-align:center;padding:16px;color:rgba(200,195,255,0.5);font-size:13px">🚫 Battle ended by admin.</div>';
-                  setTimeout(function () { if (qa) qa.innerHTML = ''; }, 3000);
-                }
-              } else {
-                var qa2 = document.getElementById('cf-quiz-area');
-                if (qa2) qa2.innerHTML = '';
+            var status = data.quiz ? data.quiz.status : null;
+            if (status === 'active') {
+              CF._renderQuizQuestion(data.quiz, CF._currentGroupId, data.memberNames);
+            } else if (status === 'finished') {
+              CF._stopGroupQuizTimer && CF._stopGroupQuizTimer();
+              CF._renderQuizResults(data.quiz, data.memberNames);
+            } else if (status === 'abandoned') {
+              CF._stopGroupQuizTimer && CF._stopGroupQuizTimer();
+              var qa = document.getElementById('cf-quiz-area');
+              if (qa) {
+                qa.innerHTML = '<div style="text-align:center;padding:16px;color:rgba(200,195,255,0.5);font-size:13px">🚫 Battle ended by admin.</div>';
+                setTimeout(function () { if (qa) qa.innerHTML = ''; }, 3000);
               }
+            } else {
+              var qa2 = document.getElementById('cf-quiz-area');
+              if (qa2) qa2.innerHTML = '';
             }
 
-            // Refresh admin bar to show End Battle button if a battle is now active
             _refreshAdminBar(CF._currentGroupId, data);
           }
-        } catch (e) {
-          // Silently ignore transient network errors
-        }
-      }, 3000);
+        } catch (e) {}
+      }, 2000);
     };
 
     /* ─────────────────────────────────────────────────────────────
-     * FIX 3 — PATCH _submitQuizAnswer
-     *   - Set _answerAnimating = true immediately, clear after 2s
-     *   - Remove the redundant getDoc() call after the Firestore write
-     *     (the next poller cycle will pick up any changes from other
-     *     players; we don't need an immediate re-read for our own answer
-     *     because we already rendered it optimistically)
+     * FIX 3 — _submitQuizAnswer is fully handled by crackai-features.js
+     *   (optimistic render, _answerAnimating flag, fire-and-forget sync,
+     *    no redundant getDoc, per-player scores for admin dashboard)
+     *   No override needed here.
      * ───────────────────────────────────────────────────────────── */
-    CF._submitQuizAnswer = async function (groupId, qIdx, chosenIdx) {
-      var g = CF._currentGroupData;
-      if (!g || !g.quiz) return;
-      if (g.quiz.answers && g.quiz.answers[qIdx]) return; // already answered
-
-      var myUid = (typeof uid === 'function') ? uid() : (window._firebaseAuth && window._firebaseAuth.currentUser ? window._firebaseAuth.currentUser.uid : 'anon');
-      var myName = (typeof getMyName === 'function') ? getMyName() : 'You';
-      var q = g.quiz.questions[qIdx];
-      var correct = (chosenIdx === q.ans);
-      var nextIdx = qIdx + 1;
-      var isLast = nextIdx >= g.quiz.questions.length;
-
-      // ── OPTIMISTIC UPDATE ──
-      var optimisticQuiz = JSON.parse(JSON.stringify(g.quiz));
-      optimisticQuiz.answers = optimisticQuiz.answers || {};
-      optimisticQuiz.answers[qIdx] = { uid: myUid, name: myName, chosen: chosenIdx, correct: correct, ts: Date.now() };
-      optimisticQuiz.xp = optimisticQuiz.xp || {};
-      optimisticQuiz.xp[myUid] = (optimisticQuiz.xp[myUid] || 0) + (correct ? 10 : 0);
-      optimisticQuiz.current = isLast ? qIdx : nextIdx;
-      optimisticQuiz.status = isLast ? 'finished' : 'active';
-
-      CF._currentGroupData = Object.assign({}, g, { quiz: optimisticQuiz });
-
-      // ── SET ANIMATION FLAG — suppresses poller for 2s ──
-      CF._answerAnimating = true;
-      CF._renderQuizQuestion(optimisticQuiz, groupId, g.memberNames);
-
-      if (correct) {
-        if (typeof toast === 'function') toast('✅ Correct! +10 XP 🔥', 1800);
-        if (typeof XP !== 'undefined') XP.add(10);
-      } else {
-        if (typeof toast === 'function') toast('❌ Wrong answer!', 1800);
-      }
-
-      if (isLast) {
-        setTimeout(function () {
-          CF._answerAnimating = false;
-          CF._renderQuizResults(optimisticQuiz, g.memberNames);
-        }, 1800);
-      } else {
-        setTimeout(function () {
-          CF._answerAnimating = false;
-          // Render next question from current (possibly server-updated) data
-          var currentQuiz = CF._currentGroupData && CF._currentGroupData.quiz;
-          CF._renderQuizQuestion(currentQuiz || optimisticQuiz, groupId, (CF._currentGroupData || g).memberNames);
-        }, 1800);
-      }
-
-      // ── BACKGROUND SYNC — fire and forget, NO follow-up getDoc ──
-      var StudyGroups = (window._CrackAI && window._CrackAI.StudyGroups) ? window._CrackAI.StudyGroups : window.StudyGroups;
-      StudyGroups.submitAnswer(groupId, g.quiz, qIdx, chosenIdx).then(function () {
-        // Update poll hash to reflect our write so the next poll cycle
-        // doesn't re-render unnecessarily
-        CF._chatPollHash = JSON.stringify({
-          msgs: ((CF._currentGroupData && CF._currentGroupData.messages) || []).length,
-          quiz: optimisticQuiz.current,
-          qstatus: optimisticQuiz.status,
-          qanswers: Object.keys(optimisticQuiz.answers || {}).length
-        });
-      }).catch(function () {});
-    };
 
     /* ─────────────────────────────────────────────────────────────
      * FIX 3b — PATCH _startQuizBattle with 3-2-1 countdown overlay
@@ -320,37 +248,36 @@
           }
 
           var newHash = JSON.stringify({
-            msgs: (data.messages || []).length,
-            quiz: data.quiz ? data.quiz.current : null,
-            qstatus: data.quiz ? data.quiz.status : null,
-            qanswers: data.quiz ? Object.keys(data.quiz.answers || {}).length : 0
+            quizStatus: data.quiz ? data.quiz.status : null,
+            quizQ: data.quiz ? data.quiz.current : null,
+            quizAnswers: data.quiz ? Object.keys(data.quiz.answers || {}).length : 0,
+            members: (data.members || []).length
           });
 
           if (newHash !== CF._chatPollHash) {
             CF._chatPollHash = newHash;
             CF._currentGroupData = data;
-            CF._renderChatMessages(data.messages || []);
-            if (!CF._answerAnimating) {
-              var status = data.quiz ? data.quiz.status : null;
-              if (status === 'active') {
-                CF._renderQuizQuestion(data.quiz, CF._currentGroupId, data.memberNames);
-              } else if (status === 'finished') {
-                CF._renderQuizResults(data.quiz, data.memberNames);
-              } else if (status === 'abandoned') {
-                var qa = document.getElementById('cf-quiz-area');
-                if (qa) {
-                  qa.innerHTML = '<div style="text-align:center;padding:16px;color:rgba(200,195,255,0.5);font-size:13px">🚫 Battle ended by admin.</div>';
-                  setTimeout(function () { if (qa) qa.innerHTML = ''; }, 3000);
-                }
-              } else {
-                var qa2 = document.getElementById('cf-quiz-area');
-                if (qa2) qa2.innerHTML = '';
+            var status = data.quiz ? data.quiz.status : null;
+            if (status === 'active') {
+              CF._renderQuizQuestion(data.quiz, CF._currentGroupId, data.memberNames);
+            } else if (status === 'finished') {
+              CF._stopGroupQuizTimer && CF._stopGroupQuizTimer();
+              CF._renderQuizResults(data.quiz, data.memberNames);
+            } else if (status === 'abandoned') {
+              CF._stopGroupQuizTimer && CF._stopGroupQuizTimer();
+              var qa = document.getElementById('cf-quiz-area');
+              if (qa) {
+                qa.innerHTML = '<div style="text-align:center;padding:16px;color:rgba(200,195,255,0.5);font-size:13px">🚫 Battle ended by admin.</div>';
+                setTimeout(function () { if (qa) qa.innerHTML = ''; }, 3000);
               }
+            } else {
+              var qa2 = document.getElementById('cf-quiz-area');
+              if (qa2) qa2.innerHTML = '';
             }
             if (typeof _refreshAdminBar === 'function') _refreshAdminBar(CF._currentGroupId, data);
           }
-        } catch (e) { /* ignore */ }
-      }, 3000);
+        } catch (e) {}
+      }, 2000);
     };
 
     /* ─────────────────────────────────────────────────────────────
