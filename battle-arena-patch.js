@@ -1344,7 +1344,7 @@
       let demoState = {
         players: [...allPlayers],
         playerNamesMap: { ...playerNamesMap },
-        questions: [],
+        questions: Array.from({length: 10}, (_, i) => ({ q: 'Q' + (i+1) + ': Loading questions...', opts: ['Loading...', 'Loading...', 'Loading...', 'Loading...'], ans: 0, topic: 'General', exp: 'Please wait...' })),
         qi: 0,
         xp: { [myUid]: 0 },
         answered: false,
@@ -1357,8 +1357,9 @@
 
       // Pre-fetch AI questions in background
       _getDemoQuestionsForExam(demoState.examKey).then(
-        qs => { demoState.questions = qs; },
+        qs => { demoState.questions = (qs && Array.isArray(qs) && qs.length > 0) ? qs : Array.from({length: 10}, (_, i) => ({ q: 'Q' + (i+1) + ': Upload questions to Firebase Storage at mock/' + demoState.examKey + '/questions.json', opts: ['Option A', 'Option B', 'Option C', 'Option D'], ans: 0, topic: 'General', exp: 'Upload question bank to gs://rankgpt-f8a64.firebasestorage.app/mock/' + demoState.examKey + '/questions.json' })); },
         err => {
+          demoState.questions = Array.from({length: 10}, (_, i) => ({ q: 'Q' + (i+1) + ': Upload questions to Firebase Storage at mock/' + demoState.examKey + '/questions.json', opts: ['Option A', 'Option B', 'Option C', 'Option D'], ans: 0, topic: 'General', exp: 'Upload question bank to gs://rankgpt-f8a64.firebasestorage.app/mock/' + demoState.examKey + '/questions.json' }));
           if (err && err.isMaintenance && typeof window.showMaintenanceOverlay === 'function') {
             window.showMaintenanceOverlay();
           }
@@ -1465,8 +1466,8 @@
         if (this._activeBattleId !== demoId) return;
         clearTimeout(demoState.botAutoTimer); clearTimeout(demoState.nextQTimer);
         const qi = demoState.qi;
-        const q  = demoState.questions[qi];
-        if (!q || qi >= 10) { _demoResults(); return; }
+        const q  = demoState.questions && demoState.questions[qi];
+        if (!q || !q.opts || qi >= 10) { _demoResults(); return; }
         demoState.answered = false;
 
         const _xpBoardHtml = () => {
@@ -1488,7 +1489,7 @@
               <div class="ba-quiz-q">${q.q}</div>
             </div>
             <div class="ba-quiz-opts" id="demo-opts">
-              ${q.opts.map((o,j) => `<button class="ba-quiz-opt" id="demo-opt-${j}" onclick="BA._demoAnswer('${demoId}',${j})"><span class="ba-opt-letter">${String.fromCharCode(65+j)}</span><span class="ba-opt-text">${o}</span></button>`).join('')}
+              ${(q.opts || ['Option A', 'Option B', 'Option C', 'Option D']).map((o,j) => `<button class="ba-quiz-opt" id="demo-opt-${j}" onclick="BA._demoAnswer('${demoId}',${j})"><span class="ba-opt-letter">${String.fromCharCode(65+j)}</span><span class="ba-opt-text">${o}</span></button>`).join('')}
             </div>
             <div id="demo-banner" style="display:none;"></div>
             <div id="demo-exp" style="display:none;" class="ba-quiz-exp"></div>
@@ -1508,11 +1509,11 @@
         clearTimeout(demoState.botAutoTimer);
         const qi   = demoState.qi;
         const q    = demoState.questions[qi];
-        if (!q) return;
+        if (!q || !q.opts || q.ans === undefined) return;
         const isBot   = chosenIdx === -1;
         const correct = !isBot && chosenIdx === q.ans;
 
-        q.opts.forEach((_, j) => {
+        (q.opts || []).forEach((_, j) => {
           const btn = document.getElementById('demo-opt-' + j);
           if (!btn) return;
           btn.disabled = true;
@@ -1537,7 +1538,8 @@
             banner.innerHTML = `⏱ Time's up! Someone answered first`;
           } else {
             banner.className = 'ba-quiz-answered-banner ' + (correct ? 'correct' : 'wrong');
-            banner.innerHTML = correct ? `✅ Correct! <b>+10 XP</b>` : `❌ Wrong! Answer: <b>${q.opts[q.ans]}</b>`;
+            const answer = (q.opts && q.opts[q.ans]) || 'Loading...';
+            banner.innerHTML = correct ? `✅ Correct! <b>+10 XP</b>` : `❌ Wrong! Answer: <b>${answer}</b>`;
           }
         }
         const expEl = document.getElementById('demo-exp');
