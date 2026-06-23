@@ -784,52 +784,70 @@ const StudyGroups = {
     try { update['memberStats.' + myUid + '.messages'] = increment(1); } catch(e) {}
     await updateDoc(doc(db, 'studyGroups', groupId), update);
   },
-  /* ── Start a quiz battle (admin only) ────────────────────── */
+  /* ── Start a mock battle (admin only) — questions from Firebase Storage mock/ ── */
   async startQuiz(groupId, type, exam) {
-    toast('🤖 Loading questions from question bank...', 3000);
-    let questions;
+    // Always use 'mock' type — fetch from Firebase Storage mock/{exam}/ folder
+    toast('🤖 Loading mock questions from question bank…', 3000);
+    let questions = [];
     try {
-      questions = await _generateQuizQuestions(exam, 10, type);
-    } catch(e) { toast('❌ Could not generate questions. Check connection.'); return; }
-    if (!questions || !questions.length) { toast('❌ AI returned no questions. Try again.'); return; }
+      if (typeof QuestionService !== 'undefined') {
+        questions = await QuestionService.loadMockTest(exam, 10);
+      }
+    } catch(e) {}
+    if (!questions || questions.length < 5) {
+      try { questions = await _generateQuizQuestions(exam, 10, 'mock'); } catch(e) {}
+    }
+    if (!questions || !questions.length) { toast('❌ No mock questions found. Upload questions to mock/' + exam + '/ in Firebase Storage.', 5000); return; }
+    // Normalize
+    const normalized = questions.map(q => ({
+      q: q.q || q.question || '',
+      opts: q.opts || q.options || [],
+      ans: typeof q.ans === 'number' ? q.ans : (typeof q.answerIndex === 'number' ? q.answerIndex : 0),
+      exp: q.exp || q.explanation || '',
+      topic: q.topic || q.subject || 'General',
+    })).filter(q => q.q && q.opts.length >= 2);
+    if (!normalized.length) { toast('❌ Question format error.', 4000); return; }
     const db = window._firebaseDb;
     const { doc, updateDoc } = window._firebaseFns;
     const quiz = {
-      type,               // 'pyq' | 'mock'
+      type: 'mock',
       exam,
-      questions,
-      current: 0,         // current question index
-      status: 'active',   // 'active' | 'finished'
-      answers: {},        // { qIdx: { uid, name, correct, ts } }
-      xp: {},             // { uid: totalXP }
+      questions: normalized,
+      current: 0,
+      status: 'countdown',
+      answers: {},
+      xp: {},
       startedAt: Date.now(),
-      startedBy: uid()
+      questionStartedAt: Date.now(),
+      startedBy: uid(),
+      countdownAt: Date.now(),
     };
     await updateDoc(doc(db, 'studyGroups', groupId), { quiz });
-    toast('🎯 Quiz started! All members can see the question now!', 3000);
+    toast('🚀 Battle starting! 3-2-1…', 3000);
   },
-  /* ── Submit an answer in quiz battle ────────────────────── */
+  /* ── Submit an answer in mock battle ────────────────────── */
   async submitAnswer(groupId, quiz, qIdx, chosenIdx) {
     if (!quiz || quiz.status !== 'active') return;
-    if (quiz.answers && quiz.answers[qIdx]) return; // already answered by someone
+    if (quiz.answers && quiz.answers[qIdx]) return;
     const db = window._firebaseDb;
     const { doc, updateDoc } = window._firebaseFns;
     const myUid = uid();
     const myName = getMyName();
     const q = quiz.questions[qIdx];
     const correct = (chosenIdx === q.ans);
-    const xpEarned = correct ? 10 : 0;
+    const xpDelta = correct ? 10 : -3;
     const currentXP = (quiz.xp && quiz.xp[myUid]) || 0;
+    const newXP = Math.max(0, currentXP + xpDelta);
     const nextIdx = qIdx + 1;
     const isLast = nextIdx >= quiz.questions.length;
     const updates = {
       ['quiz.answers.' + qIdx]: { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
-      ['quiz.xp.' + myUid]: currentXP + xpEarned,
+      ['quiz.xp.' + myUid]: newXP,
       ['quiz.current']: isLast ? qIdx : nextIdx,
       ['quiz.status']: isLast ? 'finished' : 'active',
+      ['quiz.questionStartedAt']: isLast ? (quiz.questionStartedAt || Date.now()) : Date.now(),
     };
     await updateDoc(doc(db, 'studyGroups', groupId), updates);
-    // XP and toast are handled by the optimistic UI in _submitQuizAnswer
   }
 };
 
@@ -1447,7 +1465,7 @@ async function _generateQuizQuestions(exam, count, type) {
           <div style="display:flex;gap:6px;flex-shrink:0;">
             ${isAdmin ? `<button class="cf-btn cf-btn-sm" style="background:rgba(16,185,129,0.2);color:#4ade80;border-color:rgba(74,222,128,0.3);" onclick="CF._openGroupDashboard('${g.id}')">📊</button>` : ''}
             ${isAdmin ? `<button class="cf-btn cf-btn-sm" onclick="CF._shareGroupCode('${inviteCode}','${(g.name||'').replace(/'/g,'')}')" title="Share invite code">📤</button>` : ''}
-            <button class="cf-btn cf-btn-sm cf-btn-primary" onclick="CF._openGroupChat('${g.id}')">Open →</button>
+            <button class="cf-btn cf-btn-sm cf-btn-primary" onclick="CF._openGroupChat('${g.id}')">⚔️ Battle Room →</button>
           </div>
         </div>`;
     },
@@ -1639,58 +1657,54 @@ async function _generateQuizQuestions(exam, count, type) {
         const snap = await getDoc(doc(db, 'studyGroups', groupId));
         if (!snap.exists()) { body.innerHTML = '<div class="cf-muted" style="padding:20px;text-align:center;">Group not found.</div>'; return; }
         const data = snap.data();
+        const myUid = uid();
+        // Only admin can view dashboard
+        if (data.adminUid !== myUid) { body.innerHTML = '<div class="cf-muted" style="padding:20px;text-align:center;">🔒 Admin only.</div>'; return; }
+
         const members = data.members || [];
         const memberNames = data.memberNames || {};
         const memberStats = data.memberStats || {};
-        const messages = data.messages || [];
         const inviteCode = data.code || data.inviteCode || '——';
+        const examLabel = EXAM_CONFIGS[data.exam]?.label || data.exam || 'Unknown';
 
-        // Determine admin's coaching plan for tiered analytics
-        const grpPlan = (function() {
-          try {
-            const u = global._firebaseAuth?.currentUser;
-            const p = u ? ('sscai_u:' + u.uid + ':') : 'sscai_guest:';
-            return localStorage.getItem(p + 'group_plan') || localStorage.getItem('sscai_group_plan') || null;
-          } catch(e) { return null; }
-        })();
-        const isCoachingPro = grpPlan === 'coaching_pro';
-        const isCoachingPlan = grpPlan === 'coaching_pro' || grpPlan === 'coaching_basic';
-
-        // Count messages per user
-        const msgCount = {};
-        messages.forEach(m => { if (m.uid) msgCount[m.uid] = (msgCount[m.uid]||0) + 1; });
+        // Build per-student battle XP rows from current quiz and memberStats
+        const quizXP = (data.quiz && data.quiz.xp) ? data.quiz.xp : {};
 
         const rows = members
           .filter(m => m !== data.adminUid)
           .map(m => {
             const stats = memberStats[m] || {};
-            const msgs = msgCount[m] || 0;
+            const battleXP = quizXP[m] || stats.battleXP || 0;
             const qAns = stats.questionsAnswered || 0;
-            const act = msgs + qAns;
             const lastActive = stats.lastActive ? new Date(stats.lastActive).toLocaleDateString('en-IN') : '—';
             const joined = stats.joined ? new Date(stats.joined).toLocaleDateString('en-IN') : 'Unknown';
-            const actColor = act > 20 ? '#4ade80' : act > 5 ? '#f59e0b' : '#f87171';
-            const statusDot = act > 0 ? (Date.now() - (stats.lastActive||0) < 86400000 ? '#4ade80' : '#f59e0b') : '#f87171';
-            return { uid: m, name: memberNames[m]||'Student', msgs, qAns, act, joined, lastActive, actColor, statusDot };
+            const isActiveToday = stats.lastActive && (Date.now() - stats.lastActive < 86400000);
+            const statusDot = qAns > 0 ? (isActiveToday ? '#4ade80' : '#f59e0b') : '#f87171';
+            const xpColor = battleXP >= 70 ? '#f59e0b' : battleXP >= 40 ? '#4ade80' : battleXP > 0 ? '#a78bfa' : 'rgba(200,195,255,0.3)';
+            // Avatar initial
+            const initial = (memberNames[m] || 'S').charAt(0).toUpperCase();
+            return { uid: m, name: memberNames[m]||'Student', battleXP, qAns, joined, lastActive, statusDot, xpColor, initial, isActiveToday };
           })
-          .sort((a, b) => b.act - a.act);
+          .sort((a, b) => b.battleXP - a.battleXP || b.qAns - a.qAns);
 
-        const totalMessages = messages.length;
-        const activeMembers = rows.filter(r => r.act > 0).length;
         const totalStudents = members.filter(m => m !== data.adminUid).length;
-        const avgActivity = totalStudents > 0 ? Math.round(rows.reduce((s,r)=>s+r.act,0)/Math.max(totalStudents,1)) : 0;
+        // Active = participated in at least 1 question in any battle
+        const activeMembers = rows.filter(r => r.qAns > 0).length;
+        // Engagement = students who participated in current or recent battle / total
+        const participatedInBattle = rows.filter(r => r.battleXP > 0 || r.qAns > 0).length;
+        const engagementPct = totalStudents > 0 ? Math.round((participatedInBattle / totalStudents) * 100) : 0;
+        const engColor = engagementPct >= 60 ? '#4ade80' : engagementPct >= 30 ? '#f59e0b' : '#f87171';
+        const topXP = rows.length > 0 ? rows[0].battleXP : 0;
+        const totalQAnswered = rows.reduce((s, r) => s + r.qAns, 0);
 
         body.innerHTML = `
           <button class="cf-btn cf-btn-ghost" style="margin-bottom:12px;" onclick="clearInterval(CF._dashboardPollInterval);CF._renderGroups()">← Back to Groups</button>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px;">
             <div>
-              <div style="font-size:15px;font-weight:800;color:var(--text-primary,#fff);">${data.name||'Group'} — Analytics Dashboard</div>
-              <div style="font-size:11px;color:rgba(200,195,255,0.5);">Invite Code: <span style="font-family:monospace;color:#f59e0b;font-weight:700;letter-spacing:2px;">${inviteCode}</span> · ${isCoachingPro ? '🏫 Coaching Pro' : isCoachingPlan ? '🎓 Coaching Starter' : '👥 Group Leader'}</div>
+              <div style="font-size:15px;font-weight:800;color:var(--text-primary,#fff);">${data.name||'Group'} — Analytics</div>
+              <div style="font-size:11px;color:rgba(200,195,255,0.5);">📚 ${examLabel} · Code: <span style="font-family:monospace;color:#f59e0b;font-weight:700;letter-spacing:2px;">${inviteCode}</span></div>
             </div>
-            <div style="display:flex;gap:6px;">
-              <button class="cf-btn cf-btn-sm" onclick="CF._shareGroupCode('${inviteCode}','${(data.name||'').replace(/'/g,'')}')">📤 Share</button>
-              ${isCoachingPlan ? `<button class="cf-btn cf-btn-sm" style="background:rgba(108,99,255,0.2);color:#a78bfa;border-color:rgba(108,99,255,0.3);" onclick="CF._openGroupQuiz('${data.id||''}')">🧪 Quiz</button>` : ''}
-            </div>
+            <button class="cf-btn cf-btn-sm" onclick="CF._shareGroupCode('${inviteCode}','${(data.name||'').replace(/'/g,'')}')">📤 Share</button>
           </div>
 
           <!-- KPI Cards -->
@@ -1701,66 +1715,72 @@ async function _generateQuizQuestions(exam, count, type) {
             </div>
             <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);border-radius:10px;padding:10px;text-align:center;">
               <div style="font-size:22px;font-weight:800;color:#f59e0b;">${activeMembers}</div>
-              <div style="font-size:10px;color:rgba(200,195,255,0.5);">Active</div>
+              <div style="font-size:10px;color:rgba(200,195,255,0.5);">Played</div>
             </div>
             <div style="background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.2);border-radius:10px;padding:10px;text-align:center;">
-              <div style="font-size:22px;font-weight:800;color:#a78bfa;">${totalMessages}</div>
-              <div style="font-size:10px;color:rgba(200,195,255,0.5);">Messages</div>
+              <div style="font-size:22px;font-weight:800;color:#a78bfa;">${totalQAnswered}</div>
+              <div style="font-size:10px;color:rgba(200,195,255,0.5);">Q Answered</div>
             </div>
-            <div style="background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.2);border-radius:10px;padding:10px;text-align:center;">
-              <div style="font-size:22px;font-weight:800;color:#38bdf8;">${avgActivity}</div>
-              <div style="font-size:10px;color:rgba(200,195,255,0.5);">Avg Activity</div>
+            <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);border-radius:10px;padding:10px;text-align:center;">
+              <div style="font-size:22px;font-weight:800;color:#f59e0b;">⚡${topXP}</div>
+              <div style="font-size:10px;color:rgba(200,195,255,0.5);">Top XP</div>
             </div>
           </div>
 
-          ${isCoachingPro ? `
-          <!-- Pro-only: Engagement rate bar -->
-          <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:10px;padding:10px 12px;margin-bottom:12px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-              <div style="font-size:11px;font-weight:700;color:var(--text-primary,#fff);">📈 Engagement Rate</div>
-              <div style="font-size:12px;font-weight:800;color:${activeMembers/Math.max(totalStudents,1)>0.6?'#4ade80':activeMembers/Math.max(totalStudents,1)>0.3?'#f59e0b':'#f87171'};">${totalStudents>0?Math.round((activeMembers/totalStudents)*100):0}%</div>
+          <!-- Engagement Rate — always visible, based on battle participation -->
+          <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:12px 14px;margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <div style="font-size:12px;font-weight:800;color:var(--text-primary,#fff);">📈 Engagement Rate</div>
+              <div style="font-size:14px;font-weight:900;color:${engColor};">${engagementPct}%</div>
             </div>
-            <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
-              <div style="height:100%;width:${totalStudents>0?Math.min(100,Math.round((activeMembers/totalStudents)*100)):0}%;background:linear-gradient(90deg,#6C63FF,#4ade80);border-radius:3px;transition:width 0.5s;"></div>
+            <div style="height:8px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;margin-bottom:5px;">
+              <div style="height:100%;width:${engagementPct}%;background:linear-gradient(90deg,#6C63FF,${engColor});border-radius:4px;transition:width 0.6s ease;"></div>
             </div>
-            <div style="font-size:10px;color:rgba(200,195,255,0.4);margin-top:4px;">${activeMembers} of ${totalStudents} students have been active</div>
-          </div>` : ''}
+            <div style="font-size:10px;color:rgba(200,195,255,0.4);">${participatedInBattle} of ${totalStudents} students have participated in battles</div>
+          </div>
 
-          <div style="font-size:12px;font-weight:700;color:var(--text-primary,#fff);margin-bottom:6px;">📋 Student Roster</div>
-          <div style="font-size:10px;color:rgba(200,195,255,0.35);margin-bottom:8px;">🔄 Auto-refreshes every 10s · Sorted by activity score</div>
+          <!-- Battle XP Leaderboard — student profiles -->
+          <div style="font-size:12px;font-weight:800;color:var(--text-primary,#fff);margin-bottom:4px;">⚡ Battle XP Leaderboard</div>
+          <div style="font-size:10px;color:rgba(200,195,255,0.35);margin-bottom:10px;">🔄 Auto-refreshes every 10s · Sorted by XP earned in battles</div>
           ${rows.length === 0
             ? `<div style="text-align:center;padding:24px;font-size:12px;color:rgba(200,195,255,0.4);background:rgba(255,255,255,0.02);border-radius:10px;border:1px dashed rgba(255,255,255,0.08);">
                 <div style="font-size:28px;margin-bottom:8px;">👋</div>
                 <div style="font-weight:700;color:rgba(200,195,255,0.6);margin-bottom:4px;">No students yet</div>
-                <div>Share your invite code <strong style="color:#f59e0b;">${inviteCode}</strong> with students to get started!</div>
+                <div>Share code <strong style="color:#f59e0b;">${inviteCode}</strong> with students!</div>
               </div>`
-            : `<div style="display:flex;flex-direction:column;gap:5px;">
-                <div style="display:grid;grid-template-columns:1fr ${isCoachingPro ? '50px ' : ''}36px 36px 60px;gap:4px;padding:4px 8px;font-size:10px;color:rgba(200,195,255,0.35);font-weight:700;text-transform:uppercase;">
-                  <div>Student</div>${isCoachingPro ? '<div style="text-align:center;">Joined</div>' : ''}<div style="text-align:center;">💬</div><div style="text-align:center;">Q's</div><div style="text-align:center;">Score</div>
-                </div>
-                ${rows.map((r,i)=>`
-                <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:9px;padding:9px 10px;display:grid;grid-template-columns:1fr ${isCoachingPro ? '50px ' : ''}36px 36px 60px;gap:4px;align-items:center;">
-                  <div style="display:flex;align-items:center;gap:7px;min-width:0;">
-                    <div style="width:8px;height:8px;border-radius:50%;background:${r.statusDot};flex-shrink:0;"></div>
-                    <div style="min-width:0;">
-                      <div style="font-size:12px;font-weight:700;color:var(--text-primary,#fff);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${i===0?'🥇 ':i===1?'🥈 ':i===2?'🥉 ':''}${r.name}</div>
-                      ${isCoachingPro ? '' : `<div style="font-size:9px;color:rgba(200,195,255,0.35);">${r.joined}</div>`}
+            : `<div style="display:flex;flex-direction:column;gap:6px;">
+                ${rows.map((r, i) => {
+                  const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i+1}`;
+                  const xpBarPct = topXP > 0 ? Math.min(100, Math.round((r.battleXP / topXP) * 100)) : 0;
+                  return `<div style="background:rgba(255,255,255,0.03);border:1px solid ${i < 3 ? 'rgba(108,99,255,0.25)' : 'rgba(255,255,255,0.07)'};border-radius:12px;padding:11px 12px;${i === 0 ? 'background:rgba(245,158,11,0.05);border-color:rgba(245,158,11,0.3);' : ''}">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                      <!-- Avatar -->
+                      <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#6C63FF,#FF6B9D);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:#fff;flex-shrink:0;">${r.initial}</div>
+                      <!-- Name & last active -->
+                      <div style="flex:1;min-width:0;">
+                        <div style="display:flex;align-items:center;gap:5px;">
+                          <span style="font-size:13px;font-weight:800;color:var(--text-primary,#fff);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${medal} ${r.name}</span>
+                          <div style="width:7px;height:7px;border-radius:50%;background:${r.statusDot};flex-shrink:0;" title="${r.isActiveToday ? 'Active today' : 'Last seen: ' + r.lastActive}"></div>
+                        </div>
+                        <div style="font-size:10px;color:rgba(200,195,255,0.4);">Joined ${r.joined} · ${r.qAns} Q's answered</div>
+                      </div>
+                      <!-- XP badge -->
+                      <div style="text-align:right;flex-shrink:0;">
+                        <div style="font-size:15px;font-weight:900;color:${r.xpColor};">⚡ ${r.battleXP}</div>
+                        <div style="font-size:10px;color:rgba(200,195,255,0.4);">XP</div>
+                      </div>
                     </div>
-                  </div>
-                  ${isCoachingPro ? `<div style="text-align:center;font-size:9px;color:rgba(200,195,255,0.45);line-height:1.3;">${r.joined}</div>` : ''}
-                  <div style="text-align:center;font-size:13px;font-weight:700;color:#38bdf8;">${r.msgs}</div>
-                  <div style="text-align:center;font-size:13px;font-weight:700;color:#a78bfa;">${r.qAns}</div>
-                  <div style="text-align:center;">
-                    <div style="font-size:13px;font-weight:800;color:${r.actColor};">${r.act}</div>
-                    <div style="width:100%;height:3px;background:rgba(255,255,255,0.08);border-radius:2px;margin-top:3px;"><div style="width:${rows[0].act>0?Math.min(100,(r.act/rows[0].act)*100):0}%;height:3px;background:${r.actColor};border-radius:2px;"></div></div>
-                  </div>
-                </div>`).join('')}
+                    <!-- XP bar -->
+                    <div style="height:3px;background:rgba(255,255,255,0.06);border-radius:2px;margin-top:8px;overflow:hidden;">
+                      <div style="height:100%;width:${xpBarPct}%;background:${r.xpColor};border-radius:2px;transition:width 0.5s;"></div>
+                    </div>
+                  </div>`;
+                }).join('')}
               </div>`
           }
-          ${!isCoachingPlan ? `
-          <div style="margin-top:12px;padding:10px 12px;background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.2);border-radius:9px;font-size:11px;color:rgba(200,195,255,0.6);text-align:center;">
-            ⬆️ Upgrade to <strong style="color:#a78bfa;">Coaching Starter (₹499/mo)</strong> for quiz mode, 3 groups & advanced analytics
-          </div>` : ''}`;
+          <div style="margin-top:12px;padding:10px 12px;background:rgba(108,99,255,0.06);border:1px solid rgba(108,99,255,0.15);border-radius:9px;font-size:10px;color:rgba(200,195,255,0.4);text-align:center;">
+            🔒 This dashboard is visible to group admin only · XP is earned in mock battles
+          </div>`;
       } catch(e) {
         console.error('[CF._renderGroupDashboard]', e);
         if (body) body.innerHTML = '<div class="cf-muted" style="padding:20px;text-align:center;">❌ Error loading dashboard. Tap back and retry.</div>';
@@ -1783,6 +1803,8 @@ async function _generateQuizQuestions(exam, count, type) {
       CF._chatPollHash = '';
       CF._currentGroupId = null;
       CF._currentGroupData = null;
+      CF._stopGroupQuizTimer();
+      CF._groupCountdownShown = false;
     },
 
     /* Renders all chat messages (styled beautifully) */
@@ -1844,7 +1866,7 @@ async function _generateQuizQuestions(exam, count, type) {
       </div>`;
     },
 
-    /* Renders the quiz question for the battle */
+    /* Renders the quiz question for the group battle (mock only, with 30s timer) */
     _renderQuizQuestion(quiz, groupId, memberNames) {
       const body = document.getElementById('cf-quiz-area');
       if (!body) return;
@@ -1857,26 +1879,40 @@ async function _generateQuizQuestions(exam, count, type) {
       if (!q) return;
       const answered = quiz.answers && quiz.answers[qi];
       const myUid = uid();
-      const iAnswered = answered && answered.uid === myUid;
       const someoneAnswered = !!answered;
+      const questionStartedAt = quiz.questionStartedAt || quiz.startedAt || Date.now();
+
+      // Hide waiting area while quiz is active
+      const wa = document.getElementById('cf-group-waiting-area');
+      if (wa) wa.innerHTML = '';
 
       body.innerHTML = `
         <div class="cf-quiz-battle-wrap">
           <div class="cf-quiz-progress-row">
-            <span class="cf-quiz-qnum">Question ${qi+1} / ${quiz.questions.length}</span>
-            <span class="cf-quiz-topic cf-topic-tag">${q.topic||'General'}</span>
+            <span class="cf-quiz-qnum">Q ${qi+1} <span style="opacity:0.5;">/ ${quiz.questions.length}</span></span>
+            <span class="cf-quiz-xp-pill" style="background:rgba(108,99,255,0.15);border:1px solid rgba(108,99,255,0.3);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:800;color:#a78bfa;">⚡ ${quiz.xp && quiz.xp[myUid] ? quiz.xp[myUid] : 0} XP</span>
           </div>
           <div class="cf-quiz-bar-track"><div class="cf-quiz-bar-fill" style="width:${(qi/quiz.questions.length)*100}%"></div></div>
+          <!-- 30s question timer -->
+          <div style="margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+              <span style="font-size:10px;font-weight:700;letter-spacing:0.06em;color:rgba(200,195,255,0.35);text-transform:uppercase;">⏱ Time</span>
+              <span id="cf-gqtimer-label" style="font-size:11px;font-weight:800;color:rgba(200,195,255,0.5);">30s</span>
+            </div>
+            <div style="height:3px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;">
+              <div id="cf-gqtimer-fill" style="height:100%;width:100%;background:linear-gradient(90deg,#4ade80,#f59e0b,#ef4444);border-radius:3px;transition:width 1s linear;"></div>
+            </div>
+          </div>
           <div class="cf-quiz-q">${q.question || q.q}</div>
           <div class="cf-quiz-opts" id="cf-quiz-opts">
-            ${q.opts.map((o,j)=>{
+            ${(q.opts || q.options || []).map((o,j)=>{
               let cls = 'cf-quiz-opt';
               if (someoneAnswered) {
                 if (j === q.ans) cls += ' cf-quiz-opt-correct';
                 else if (answered && j === answered.chosen && j !== q.ans) cls += ' cf-quiz-opt-wrong';
                 else cls += ' cf-quiz-opt-dim';
               }
-              return `<button class="cf-quiz-opt ${someoneAnswered?'cf-quiz-opt-disabled':''}" 
+              return `<button class="${cls} ${someoneAnswered?'cf-quiz-opt-disabled':''}" 
                 data-idx="${j}" 
                 onclick="${someoneAnswered ? '' : `CF._submitQuizAnswer('${groupId}',${qi},${j})`}"
                 ${someoneAnswered ? 'disabled' : ''}>
@@ -1891,10 +1927,17 @@ async function _generateQuizQuestions(exam, count, type) {
               <strong>${answered.name}</strong> answered first
               ${answered.correct ? ' — <b>+10 XP</b>' : ''}
             </div>
-            <div class="cf-quiz-exp">💡 ${q.exp||'See explanation above.'}</div>
+            <div class="cf-quiz-exp">💡 ${q.exp||q.explanation||'Keep going!'}</div>
           ` : `<div class="cf-quiz-waiting">⚡ Be first to answer and earn <b>+10 XP</b>!</div>`}
           ${CF._renderXPBoard(quiz, memberNames)}
         </div>`;
+
+      // Start or maintain the 30s per-question timer
+      if (!someoneAnswered) {
+        CF._startGroupQuizTimer(groupId, qi, questionStartedAt);
+      } else {
+        CF._stopGroupQuizTimer();
+      }
     },
 
     /* Renders quiz final results popup */
@@ -1923,9 +1966,10 @@ async function _generateQuizQuestions(exam, count, type) {
         </div>`;
     },
 
-    /* Opens group chat room with real-time polling */
+    /* ── Group Battle Room (no chat — pure quiz battle) ── */
     async _openGroupChat(groupId) {
       CF._stopChatPolling();
+      CF._stopGroupQuizTimer();
       const db = window._firebaseDb;
       const { doc, getDoc } = window._firebaseFns;
       const body = document.getElementById('cf-groups-modal_body');
@@ -1939,111 +1983,263 @@ async function _generateQuizQuestions(exam, count, type) {
       CF._currentGroupData = g;
       const isAdmin = g.adminUid === uid();
       const examLabel = EXAM_CONFIGS[g.exam]?.label || g.exam;
+      const memberCount = (g.members || []).length;
 
       body.innerHTML = `
         <div class="cf-chat-topbar">
-          <button class="cf-btn cf-btn-ghost cf-chat-back" onclick="CF._stopChatPolling();CF._renderGroups()">← Back</button>
+          <button class="cf-btn cf-btn-ghost cf-chat-back" onclick="CF._stopChatPolling();CF._stopGroupQuizTimer();CF._renderGroups()">← Back</button>
           <div class="cf-chat-topbar-info">
             <span class="cf-chat-gname">${g.name}</span>
             <span class="cf-topic-tag" style="font-size:10px">${examLabel}</span>
           </div>
           <button class="cf-btn cf-btn-ghost cf-chat-code-btn" onclick="navigator.clipboard?.writeText('${g.code}');CF.toast('📋 Code ${g.code} copied!')">📋 ${g.code}</button>
         </div>
+        <div id="cf-group-battle-area" style="flex:1;overflow-y:auto;padding:12px 14px 80px;">
+          <div id="cf-quiz-area"></div>
+          <div id="cf-group-waiting-area"></div>
+        </div>
         ${isAdmin ? `
-        <div class="cf-admin-bar" id="cf-admin-bar">
-          <span style="font-size:11px;font-weight:700;color:#f59e0b;margin-right:4px">👑 Admin</span>
-          <button class="cf-btn cf-btn-sm cf-btn-primary" onclick="CF._showStartQuiz('${groupId}','${g.exam}')">🎯 Start Quiz Battle</button>
-        </div>` : ''}
-        <div id="cf-quiz-area"></div>
-        <div class="cf-chat-messages cf-chat-fullscreen" id="cf-chat-msgs"></div>
-        <div class="cf-chat-input-row">
-          <input class="cf-input" id="cf-chat-input" placeholder="Message your group…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();CF._sendGroupMsg('${groupId}')}" />
-          <button class="cf-btn cf-btn-primary cf-chat-send-btn" onclick="CF._sendGroupMsg('${groupId}')">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-          </button>
-        </div>`;
+        <div class="cf-admin-bar" id="cf-admin-bar" style="position:sticky;bottom:0;z-index:10;background:var(--bg-primary,#0d0d18);border-top:1px solid rgba(108,99,255,0.18);padding:10px 14px;">
+          <span style="font-size:11px;font-weight:700;color:#f59e0b;margin-right:8px;">👑 Admin Controls</span>
+          <button class="cf-btn cf-btn-sm cf-btn-primary" id="cf-start-battle-btn" onclick="CF._startGroupBattle('${groupId}','${g.exam}')">⚔️ Start Mock Battle</button>
+        </div>` : `
+        <div style="position:sticky;bottom:0;background:var(--bg-primary,#0d0d18);border-top:1px solid rgba(108,99,255,0.1);padding:10px 14px;text-align:center;font-size:12px;color:rgba(200,195,255,0.4);font-weight:600;">
+          ⏳ Waiting for admin to start the battle...
+        </div>`}`;
 
-      CF._renderChatMessages(g.messages || []);
-      if (g.quiz && g.quiz.status === 'active') CF._renderQuizQuestion(g.quiz, groupId, g.memberNames);
-      else if (g.quiz && g.quiz.status === 'finished') CF._renderQuizResults(g.quiz, g.memberNames);
+      // Show waiting room or active quiz
+      CF._renderGroupWaitingRoom(g, groupId, isAdmin);
+      if (g.quiz) {
+        if (g.quiz.status === 'countdown') CF._handleGroupCountdown(g, groupId);
+        else if (g.quiz.status === 'active') CF._renderQuizQuestion(g.quiz, groupId, g.memberNames);
+        else if (g.quiz.status === 'finished') CF._renderQuizResults(g.quiz, g.memberNames);
+      }
 
-      // Start polling every 3s — NO onSnapshot
-      CF._chatPollHash = JSON.stringify({ msgs: (g.messages||[]).length, quiz: g.quiz?.current, qstatus: g.quiz?.status, qanswers: Object.keys(g.quiz?.answers||{}).length });
+      // Poll every 1.5s for active battle, 3s otherwise
+      CF._chatPollHash = JSON.stringify({ quizStatus: g.quiz?.status, quizQ: g.quiz?.current, quizAnswers: Object.keys(g.quiz?.answers||{}).length, members: memberCount });
       CF._chatPollInterval = setInterval(async () => {
         if (!CF._currentGroupId) return;
         try {
           const s = await getDoc(doc(db, 'studyGroups', CF._currentGroupId));
           if (!s.exists()) { CF._stopChatPolling(); return; }
           const data = s.data();
-          const newHash = JSON.stringify({
-            msgs: (data.messages||[]).length,
-            quiz: data.quiz?.current,
-            qstatus: data.quiz?.status,
-            qanswers: Object.keys(data.quiz?.answers||{}).length
-          });
+          const newHash = JSON.stringify({ quizStatus: data.quiz?.status, quizQ: data.quiz?.current, quizAnswers: Object.keys(data.quiz?.answers||{}).length, members: (data.members||[]).length });
           if (newHash !== CF._chatPollHash) {
             CF._chatPollHash = newHash;
             CF._currentGroupData = data;
-            CF._renderChatMessages(data.messages || []);
-            if (data.quiz && (data.quiz.status === 'active' || data.quiz.status === 'finished')) {
+            if (data.quiz?.status === 'countdown' && !CF._groupCountdownShown) {
+              CF._handleGroupCountdown(data, CF._currentGroupId);
+            } else if (data.quiz?.status === 'active') {
+              CF._stopGroupQuizTimer();
               CF._renderQuizQuestion(data.quiz, CF._currentGroupId, data.memberNames);
+              CF._startGroupQuizTimer(CF._currentGroupId, data.quiz.current, data.quiz.questionStartedAt);
+            } else if (data.quiz?.status === 'finished') {
+              CF._stopGroupQuizTimer();
+              CF._renderQuizResults(data.quiz, data.memberNames);
             } else {
+              CF._stopGroupQuizTimer();
+              CF._renderGroupWaitingRoom(data, CF._currentGroupId, data.adminUid === uid());
               const qa = document.getElementById('cf-quiz-area');
               if (qa) qa.innerHTML = '';
             }
           }
         } catch(e) {}
-      }, 3000);
+      }, 1500);
     },
 
-    async _sendGroupMsg(groupId) {
-      const input = document.getElementById('cf-chat-input');
-      if (!input || !input.value.trim()) return;
-      const text = input.value.trim();
-      input.value = '';
-      try {
-        await StudyGroups.addMessage(groupId, text);
-        const db = window._firebaseDb;
-        const { doc, getDoc } = window._firebaseFns;
-        const snap = await getDoc(doc(db, 'studyGroups', groupId));
-        if (snap.exists()) {
-          CF._currentGroupData = snap.data();
-          CF._renderChatMessages(snap.data().messages || []);
-          CF._chatPollHash = JSON.stringify({
-            msgs: (snap.data().messages||[]).length,
-            quiz: snap.data().quiz?.current,
-            qstatus: snap.data().quiz?.status,
-            qanswers: Object.keys(snap.data().quiz?.answers||{}).length
-          });
-        }
-      } catch(e) { toast('❌ Message failed. Check connection.'); }
-    },
-
-    /* Admin: show quiz type picker */
-    _showStartQuiz(groupId, exam) {
-      const bar = document.getElementById('cf-admin-bar');
-      if (!bar) return;
-      bar.innerHTML = `
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0">
-          <span style="font-size:11px;font-weight:700;color:#f59e0b">👑 Start Quiz:</span>
-          <button class="cf-btn cf-btn-sm cf-btn-primary" onclick="CF._startQuizBattle('${groupId}','${exam}','pyq')">📚 PYQ Battle</button>
-          <button class="cf-btn cf-btn-sm" style="background:rgba(108,99,255,0.2);border:1px solid rgba(108,99,255,0.4);color:#a78bfa;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;font-weight:600" onclick="CF._startQuizBattle('${groupId}','${exam}','mock')">🎯 Mock Battle</button>
-          <button class="cf-btn cf-btn-sm cf-btn-ghost" onclick="CF._resetAdminBar('${groupId}','${exam}')">✕</button>
+    /* ── Waiting Room — shows members joined, waiting for admin to start ── */
+    _renderGroupWaitingRoom(g, groupId, isAdmin) {
+      const el = document.getElementById('cf-group-waiting-area');
+      if (!el) return;
+      if (g.quiz && (g.quiz.status === 'active' || g.quiz.status === 'finished' || g.quiz.status === 'countdown')) {
+        el.innerHTML = '';
+        return;
+      }
+      const members = g.members || [];
+      const memberNames = g.memberNames || {};
+      const examLabel = EXAM_CONFIGS[g.exam]?.label || g.exam;
+      el.innerHTML = `
+        <div style="text-align:center;padding:24px 0 16px;">
+          <div style="font-size:40px;margin-bottom:10px;">⚔️</div>
+          <div style="font-size:17px;font-weight:800;color:#fff;margin-bottom:4px;">${g.name}</div>
+          <div style="font-size:12px;color:rgba(200,195,255,0.5);margin-bottom:16px;">📚 ${examLabel} · Mock Battle</div>
+          <div style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.2);border-radius:12px;padding:12px;margin-bottom:16px;">
+            <div style="font-size:13px;color:#4ade80;font-weight:700;">🟢 ${members.length} player${members.length!==1?'s':''} in room</div>
+            <div style="font-size:11px;color:rgba(200,195,255,0.5);margin-top:3px;">${isAdmin ? 'Press ⚔️ Start Mock Battle when ready' : 'Waiting for admin to start the battle…'}</div>
+          </div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;color:rgba(200,195,255,0.35);text-transform:uppercase;margin-bottom:8px;">👥 Players Ready</div>
+          <div style="display:flex;flex-wrap:wrap;gap:7px;justify-content:center;">
+            ${members.map(m => `<div style="background:rgba(108,99,255,0.15);border:1px solid rgba(108,99,255,0.25);border-radius:20px;padding:5px 12px;font-size:12px;font-weight:700;color:#a78bfa;">${memberNames[m]||'Student'}</div>`).join('')}
+          </div>
         </div>`;
     },
 
-    _resetAdminBar(groupId, exam) {
-      const bar = document.getElementById('cf-admin-bar');
-      if (!bar) return;
-      bar.innerHTML = `<span style="font-size:11px;font-weight:700;color:#f59e0b;margin-right:4px">👑 Admin</span>
-        <button class="cf-btn cf-btn-sm cf-btn-primary" onclick="CF._showStartQuiz('${groupId}','${exam}')">🎯 Start Quiz Battle</button>`;
+    /* ── 3-2-1 Countdown overlay for group battle ── */
+    _groupCountdownShown: false,
+    _handleGroupCountdown(data, groupId) {
+      if (CF._groupCountdownShown) return;
+      CF._groupCountdownShown = true;
+
+      const overlay = document.createElement('div');
+      overlay.id = 'cf-group-countdown-overlay';
+      overlay.style.cssText = `position:fixed;inset:0;z-index:999990;background:radial-gradient(ellipse at center,rgba(10,8,30,0.98),rgba(0,0,0,0.99));display:flex;flex-direction:column;align-items:center;justify-content:center;`;
+      overlay.innerHTML = `
+        <div id="cf-gcdown-num" style="font-size:96px;font-weight:900;color:#fff;font-family:'Space Grotesk',sans-serif;line-height:1;animation:ba-countpop 0.6s ease;">3</div>
+        <div style="font-size:16px;font-weight:700;color:rgba(200,195,255,0.6);margin-top:12px;">Get Ready for Battle!</div>
+        <div style="font-size:13px;color:rgba(200,195,255,0.35);margin-top:6px;">${EXAM_CONFIGS[data.exam]?.label||data.exam} · Mock Test</div>`;
+      document.body.appendChild(overlay);
+
+      let count = 3;
+      const numEl = overlay.querySelector('#cf-gcdown-num');
+      const tick = () => {
+        count--;
+        if (count > 0) {
+          if (numEl) { numEl.textContent = count; numEl.style.animation='none'; void numEl.offsetWidth; numEl.style.animation='ba-countpop 0.6s ease'; }
+          setTimeout(tick, 1000);
+        } else {
+          if (numEl) { numEl.textContent = 'GO!'; numEl.style.animation='none'; void numEl.offsetWidth; numEl.style.animation='ba-countpop 0.6s ease'; }
+          // Activate battle (admin only)
+          if (data.adminUid === uid()) {
+            const db = window._firebaseDb;
+            const { doc, updateDoc } = window._firebaseFns;
+            updateDoc(doc(db, 'studyGroups', groupId), {
+              'quiz.status': 'active',
+              'quiz.startedAt': Date.now(),
+              'quiz.questionStartedAt': Date.now(),
+            }).catch(()=>{});
+          }
+          setTimeout(() => {
+            overlay.remove();
+            CF._groupCountdownShown = false;
+          }, 800);
+        }
+      };
+      setTimeout(tick, 1000);
     },
 
-    async _startQuizBattle(groupId, exam, type) {
-      const bar = document.getElementById('cf-admin-bar');
-      if (bar) bar.innerHTML = `<span style="font-size:12px;color:rgba(200,195,255,0.5)">⏳ Loading ${type==='pyq'?'PYQ':'Mock'} questions from question bank…</span>`;
-      await StudyGroups.startQuiz(groupId, type, exam);
-      CF._resetAdminBar(groupId, exam);
+    /* ── Per-question 30s timer for group battle ── */
+    _groupQuizTimer: null,
+    _groupQuizTimerQi: -1,
+
+    _stopGroupQuizTimer() {
+      if (CF._groupQuizTimer) { clearInterval(CF._groupQuizTimer); CF._groupQuizTimer = null; }
+      CF._groupQuizTimerQi = -1;
+    },
+
+    _startGroupQuizTimer(groupId, qi, questionStartedAt) {
+      if (CF._groupQuizTimerQi === qi && CF._groupQuizTimer) return;
+      CF._stopGroupQuizTimer();
+      CF._groupQuizTimerQi = qi;
+      const startMs = questionStartedAt || Date.now();
+      const QUESTION_TIME = 30;
+      const tick = () => {
+        const elapsed = Math.floor((Date.now() - startMs) / 1000);
+        const remaining = Math.max(0, QUESTION_TIME - elapsed);
+        const pct = (remaining / QUESTION_TIME) * 100;
+        const fill = document.getElementById('cf-gqtimer-fill');
+        const label = document.getElementById('cf-gqtimer-label');
+        if (fill) fill.style.width = pct + '%';
+        if (label) {
+          label.textContent = remaining + 's';
+          label.style.color = remaining <= 5 ? '#ef4444' : remaining <= 10 ? '#f59e0b' : 'rgba(200,195,255,0.5)';
+        }
+        if (remaining <= 0) {
+          CF._stopGroupQuizTimer();
+          const skipKey = 'cf_skip_' + groupId + '_q' + qi;
+          if (!sessionStorage.getItem(skipKey)) {
+            sessionStorage.setItem(skipKey, '1');
+            CF._autoSkipGroupQuestion(groupId, qi);
+          }
+        }
+      };
+      tick();
+      CF._groupQuizTimer = setInterval(tick, 1000);
+    },
+
+    async _autoSkipGroupQuestion(groupId, qi) {
+      try {
+        const db = window._firebaseDb;
+        const { doc, getDoc, updateDoc } = window._firebaseFns;
+        const snap = await getDoc(doc(db, 'studyGroups', groupId));
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const quiz = data.quiz || {};
+        if (quiz.current !== qi || quiz.status !== 'active') return;
+        const nextIdx = qi + 1;
+        const isLast = nextIdx >= (quiz.questions || []).length;
+        await updateDoc(doc(db, 'studyGroups', groupId), {
+          'quiz.current': isLast ? qi : nextIdx,
+          'quiz.status': isLast ? 'finished' : 'active',
+          'quiz.questionStartedAt': isLast ? (quiz.questionStartedAt || Date.now()) : Date.now(),
+        });
+      } catch(e) {}
+    },
+
+    /* ── Admin: load questions from Firebase Storage mock/ folder and start countdown ── */
+    async _startGroupBattle(groupId, exam) {
+      const btn = document.getElementById('cf-start-battle-btn');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Loading questions…'; }
+      try {
+        toast('🤖 Fetching mock questions from question bank…', 3000);
+        let questions = [];
+        // Load from Firebase Storage mock/{exam}/ folder
+        try {
+          if (typeof QuestionService !== 'undefined') {
+            questions = await QuestionService.loadMockTest(exam, 10);
+          }
+        } catch(e) {}
+
+        // Fallback: use _generateQuizQuestions helper
+        if (!questions || questions.length < 5) {
+          try { questions = await _generateQuizQuestions(exam, 10, 'mock'); } catch(e) {}
+        }
+
+        if (!questions || questions.length === 0) {
+          toast('❌ No mock questions found for this exam. Upload questions to mock/' + exam + '/ in Firebase Storage.', 5000);
+          if (btn) { btn.disabled = false; btn.textContent = '⚔️ Start Mock Battle'; }
+          return;
+        }
+
+        // Normalize questions to {q, opts, ans, exp, topic} format
+        const normalized = questions.map(q => ({
+          q: q.q || q.question || '',
+          opts: q.opts || q.options || [],
+          ans: typeof q.ans === 'number' ? q.ans : (typeof q.answerIndex === 'number' ? q.answerIndex : 0),
+          exp: q.exp || q.explanation || '',
+          topic: q.topic || q.subject || 'General',
+        })).filter(q => q.q && q.opts.length >= 2);
+
+        if (!normalized.length) {
+          toast('❌ Question format error. Check question files.', 4000);
+          if (btn) { btn.disabled = false; btn.textContent = '⚔️ Start Mock Battle'; }
+          return;
+        }
+
+        const db = window._firebaseDb;
+        const { doc, updateDoc } = window._firebaseFns;
+        const quiz = {
+          type: 'mock',
+          exam,
+          questions: normalized,
+          current: 0,
+          status: 'countdown',
+          answers: {},
+          xp: {},
+          startedAt: Date.now(),
+          questionStartedAt: Date.now(),
+          startedBy: uid(),
+          countdownAt: Date.now(),
+        };
+        await updateDoc(doc(db, 'studyGroups', groupId), { quiz });
+        toast('🚀 Battle starting! 3-2-1…', 3000);
+
+        // Trigger countdown on this client immediately
+        const data = CF._currentGroupData || {};
+        CF._handleGroupCountdown({ ...data, exam, adminUid: data.adminUid || uid() }, groupId);
+      } catch(e) {
+        toast('❌ Could not start battle: ' + (e.message || 'Check connection'));
+        if (btn) { btn.disabled = false; btn.textContent = '⚔️ Start Mock Battle'; }
+      }
     },
 
     async _submitQuizAnswer(groupId, qIdx, chosenIdx) {
@@ -2051,57 +2247,67 @@ async function _generateQuizQuestions(exam, count, type) {
       if (!g || !g.quiz) return;
       if (g.quiz.answers && g.quiz.answers[qIdx]) return; // already answered
 
+      CF._stopGroupQuizTimer();
+
       const myUid = uid();
       const myName = getMyName();
       const q = g.quiz.questions[qIdx];
       const correct = (chosenIdx === q.ans);
       const nextIdx = qIdx + 1;
       const isLast = nextIdx >= g.quiz.questions.length;
+      const xpEarned = correct ? 10 : -3;
+      const currentXP = (g.quiz.xp && g.quiz.xp[myUid]) || 0;
+      const newXP = Math.max(0, currentXP + xpEarned);
 
-      // ── OPTIMISTIC UPDATE: render immediately, don't wait for server ──
-      const optimisticQuiz = JSON.parse(JSON.stringify(g.quiz)); // deep clone
+      // ── OPTIMISTIC UPDATE ──
+      const optimisticQuiz = JSON.parse(JSON.stringify(g.quiz));
       optimisticQuiz.answers = optimisticQuiz.answers || {};
       optimisticQuiz.answers[qIdx] = { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() };
       optimisticQuiz.xp = optimisticQuiz.xp || {};
-      optimisticQuiz.xp[myUid] = (optimisticQuiz.xp[myUid] || 0) + (correct ? 10 : 0);
+      optimisticQuiz.xp[myUid] = newXP;
       optimisticQuiz.current = isLast ? qIdx : nextIdx;
       optimisticQuiz.status = isLast ? 'finished' : 'active';
+      optimisticQuiz.questionStartedAt = isLast ? (g.quiz.questionStartedAt || Date.now()) : Date.now();
 
-      // Update local data & render RIGHT NOW — user sees result instantly
       CF._currentGroupData = { ...g, quiz: optimisticQuiz };
       CF._renderQuizQuestion(optimisticQuiz, groupId, g.memberNames);
-      if (correct) {
-        toast('✅ Correct! +10 XP 🔥', 1800);
-        if (typeof XP !== 'undefined') XP.add(10);
-      } else {
-        toast('❌ Wrong answer!', 1800);
-      }
+      if (correct) { toast('✅ Correct! +10 XP 🔥', 1800); if (typeof XP !== 'undefined') XP.add(10); }
+      else { toast('❌ Wrong! -3 XP', 1800); }
 
-      // After a short pause (so user can read result), advance to next question
-      if (!isLast) {
-        setTimeout(() => {
-          CF._renderQuizQuestion(optimisticQuiz, groupId, g.memberNames);
-        }, 1800);
-      }
-
-      // ── BACKGROUND SYNC: write to Firestore without blocking UI ──
-      StudyGroups.submitAnswer(groupId, g.quiz, qIdx, chosenIdx).then(() => {
-        // Pull fresh data after write to sync all members' states
+      // ── BACKGROUND SYNC ──
+      try {
         const db = window._firebaseDb;
-        const { doc, getDoc } = window._firebaseFns;
-        return getDoc(doc(db, 'studyGroups', groupId));
-      }).then(snap => {
-        if (!snap || !snap.exists()) return;
-        const data = snap.data();
-        CF._currentGroupData = data;
-        CF._renderQuizQuestion(data.quiz, groupId, data.memberNames);
-        CF._chatPollHash = JSON.stringify({
-          msgs: (data.messages||[]).length,
-          quiz: data.quiz?.current,
-          qstatus: data.quiz?.status,
-          qanswers: Object.keys(data.quiz?.answers||{}).length
-        });
-      }).catch(() => {});
+        const { doc, updateDoc } = window._firebaseFns;
+        const updates = {
+          ['quiz.answers.' + qIdx]: { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
+          ['quiz.xp.' + myUid]: newXP,
+          ['quiz.current']: isLast ? qIdx : nextIdx,
+          ['quiz.status']: isLast ? 'finished' : 'active',
+          ['quiz.questionStartedAt']: isLast ? (g.quiz.questionStartedAt || Date.now()) : Date.now(),
+        };
+        await updateDoc(doc(db, 'studyGroups', groupId), updates);
+
+        // Update dashboard XP stats
+        const { getDoc } = window._firebaseFns;
+        const snap = await getDoc(doc(db, 'studyGroups', groupId));
+        if (snap && snap.exists()) {
+          const data = snap.data();
+          CF._currentGroupData = data;
+          CF._renderQuizQuestion(data.quiz, groupId, data.memberNames);
+          CF._chatPollHash = JSON.stringify({ quizStatus: data.quiz?.status, quizQ: data.quiz?.current, quizAnswers: Object.keys(data.quiz?.answers||{}).length, members: (data.members||[]).length });
+          // Save battle XP to memberStats for dashboard tracking
+          if (newXP > 0) {
+            try {
+              await updateDoc(doc(db, 'studyGroups', groupId), {
+                ['memberStats.' + myUid + '.battleXP']: newXP,
+                ['memberStats.' + myUid + '.questionsAnswered']: (data.memberStats?.[myUid]?.questionsAnswered || 0) + 1,
+                ['memberStats.' + myUid + '.lastActive']: Date.now(),
+                ['memberNames.' + myUid]: myName,
+              });
+            } catch(e) {}
+          }
+        }
+      } catch(e) {}
     },
 
     /* ── DAILY GOAL RENDERING ── */
