@@ -1064,6 +1064,8 @@
       if (this._pollListInterval) { clearInterval(this._pollListInterval); this._pollListInterval = null; }
       if (this._pollGameInterval) { clearInterval(this._pollGameInterval); this._pollGameInterval = null; }
       if (this._genTimerInterval) { clearInterval(this._genTimerInterval); this._genTimerInterval = null; }
+      // Reset countdown flag when stopping polling
+      this._countdownShown = false;
       // Clean up any active demo battle timers
       if (this._activeBattleId && this._activeBattleId.startsWith('demo_')) {
         if (this._demoCleanup && this._demoCleanup[this._activeBattleId]) {
@@ -2023,6 +2025,7 @@
           }
         } else if (data.status === 'active') {
           // FIX 2: clear flag so next battle works
+          // Keep countdown shown flag true until we see active, preventing duplicate countdowns
           this._countdownShown = false;
           this._renderActiveQuiz(data);
         } else if (data.status === 'finished') {
@@ -2031,6 +2034,8 @@
           this._countdownShown = false;
           this._renderBattleWinner(data);
         } else {
+          // Reset countdown flag if we go back to waiting/other status
+          this._countdownShown = false;
           this._renderBattleRoom(data);
         }
       } catch(e) {}
@@ -2140,6 +2145,13 @@
     /* ── Start countdown (creator / admin only) ── */
     async _startCountdown(battleId) {
       if (!battleId) { toast('❌ Battle ID missing — please recreate the battle.'); return; }
+      
+      // Prevent double-trigger by checking if countdown/active already happening
+      if (this._countdownShown) {
+        toast('⏳ Countdown already in progress...', 2000);
+        return;
+      }
+      
       const db = window._firebaseDb;
       const { doc, getDoc, updateDoc } = window._firebaseFns;
 
@@ -2157,7 +2169,11 @@
         const battle = snap.data();
 
         // If already generating/countdown/active/finished — do not double-trigger
-        if (['generating','countdown','active','finished'].includes(battle.status)) return;
+        if (['generating','countdown','active','finished'].includes(battle.status)) {
+          toast('Battle already started!', 2000);
+          if (startBtn) { startBtn.disabled = false; startBtn.textContent = '⚔️ Start Battle'; }
+          return;
+        }
 
         // ── FAST PATH: questions already pre-generated in background ──
         if (battle.questions && battle.questions.length >= QUESTIONS_PER_BATTLE) {
@@ -2261,9 +2277,14 @@
 
     /* ── Countdown 3-2-1 overlay ── */
     _countdownShown: false,
+    _countdownLastShownAt: 0,
     _handleCountdown(data, battleId) {
       if (this._countdownShown) return;
+      // Skip if we showed countdown less than 5 seconds ago (debounce)
+      if (Date.now() - this._countdownLastShownAt < 5000) return;
+      
       this._countdownShown = true;
+      this._countdownLastShownAt = Date.now();
 
       // Show fullscreen overlay
       const overlay = document.createElement('div');
@@ -2310,7 +2331,8 @@
           }
           setTimeout(() => {
             overlay.remove();
-            this._countdownShown = false;
+            // Don't reset _countdownShown here - let polling reset it when status becomes 'active'
+            // This prevents duplicate countdowns from polling reading stale 'countdown' status
             this._pollGameBattle(battleId);
           }, 800);
         }
