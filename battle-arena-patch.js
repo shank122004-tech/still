@@ -50,7 +50,7 @@
   const BATTLE_PROMO     = 'MU1R43PNZ889VKSZ';   // promo code for free battle access
   const QUESTIONS_PER_BATTLE = 10; // default; overridden by battle.questionCount
   const POLL_BATTLE_LIST = 4000;            // ms — public battle list refresh
-  const POLL_ACTIVE_GAME = 1000;            // ms — active battle question poll (1s for fast sync)
+  const POLL_ACTIVE_GAME = 300;             // ms — active battle question poll (fast sync after answer)
   const QUESTION_TIME    = 30;             // seconds per question before auto-skip
   const LS_PROMO_KEY     = 'sscai_battle_promo_unlocked';
   const LS_XP_BATTLE_KEY = 'sscai_battle_weekly_xp';
@@ -2448,7 +2448,7 @@
       };
 
       tick(); // immediate first render
-      this._questionTimer = setInterval(tick, 1000);
+      this._questionTimer = setInterval(tick, 100); // Update every 100ms for smooth countdown
     },
 
     async _autoSkipQuestion(battleId, qi) {
@@ -2518,12 +2518,15 @@
         // Stop the local countdown timer immediately
         this._stopQuestionTimer();
 
+        // Set question started time to NOW for accurate timing on all clients
+        const questionStartTs = Date.now();
+
         const updates = {
           ['quiz.answers.' + qi]: { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
           ['quiz.xp.' + myUid]: newXP,
           ['quiz.current']: isLast ? qi : nextIdx,
           ['quiz.status']: isLast ? 'finished' : 'active',
-          ['quiz.questionStartedAt']: isLast ? (quiz.questionStartedAt || Date.now()) : Date.now(),
+          ['quiz.questionStartedAt']: isLast ? (quiz.questionStartedAt || questionStartTs) : questionStartTs,
         };
 
         if (isLast) {
@@ -2548,9 +2551,13 @@
         toast('❌ Submit error. Check connection.', 2000);
       }
 
-      // FIX 3: immediately re-poll so next question shows without delay
+      // FIX 3: aggressive re-polling so next question shows instantly
+      // Poll at 100ms, 250ms, 400ms to catch Firestore update quickly
       if (this._activeBattleId) {
-        setTimeout(() => this._pollGameBattle(this._activeBattleId), 300);
+        const battleId = this._activeBattleId;
+        setTimeout(() => this._pollGameBattle(battleId), 100);
+        setTimeout(() => this._pollGameBattle(battleId), 250);
+        setTimeout(() => this._pollGameBattle(battleId), 400);
       }
     },
 
