@@ -51,6 +51,7 @@
   const QUESTIONS_PER_BATTLE = 10; // default; overridden by battle.questionCount
   const POLL_BATTLE_LIST = 4000;            // ms — public battle list refresh
   const POLL_ACTIVE_GAME = 1000;            // ms — active battle question poll (1s for fast sync)
+  const QUESTION_TIME    = 30;             // seconds per question before auto-skip
   const LS_PROMO_KEY     = 'sscai_battle_promo_unlocked';
   const LS_XP_BATTLE_KEY = 'sscai_battle_weekly_xp';
   const WEEKLY_REWARD_PLAN = 'battle_weekly_reward';
@@ -1610,41 +1611,47 @@
         }
         addBattleXP(myXP);
 
-        // ── Save demo bot results to local leaderboard for social proof ──
+        // ── Save demo bot results to LOCAL leaderboard ONLY (not Firestore) ──
+        // Do NOT mix demo players with real users on Firestore leaderboard
         try {
           const wk = typeof getWeekKey === 'function' ? getWeekKey() : 'w0';
           const demoLbKey = 'sscai_demo_lb_entries';
           const existing = JSON.parse(localStorage.getItem(demoLbKey) || '[]');
-          const existingNames = new Set(existing.map(e => e.name));
+          
+          // Remove old entries from previous weeks (keep only this week)
+          const thisWeekEntries = existing.filter(e => e.weekKey === wk);
+          
+          // Cap demo entries at 5 per week (not 30)
+          if (thisWeekEntries.length >= 5) {
+            // Don't add more demo entries this week
+            return;
+          }
+          
+          const existingNames = new Set(thisWeekEntries.map(e => e.name));
+          const demoNames = ['Arjun', 'Priya', 'Rohan', 'Neha', 'Karan', 'Sakshi', 'Aditya', 'Divya', 'Ravi', 'Anjali'];
+          const uniqueDemoNames = demoNames.filter(n => !existingNames.has(n));
+          
           const newEntries = sorted
             .filter(([u]) => u !== myUid)
-            .filter(([u, x]) => !existingNames.has(demoState.playerNamesMap[u] || ''))
+            .slice(0, Math.min(2, uniqueDemoNames.length))  // Only 2 demo bots per battle
             .map(([u, xp], idx) => ({
               uid: 'demo_' + u + '_' + Date.now(),
-              name: demoState.playerNamesMap[u] || ('Player ' + (idx + 1)),
-              xp: xp || 0,
-              battles: Math.floor(Math.random() * 12) + 1,
-              wins: Math.floor(Math.random() * 5),
+              name: uniqueDemoNames[idx] || ('Bot' + idx),
+              // CAP demo XP at 100 max (not hundreds)
+              xp: Math.min(xp || 0, 100),
+              battles: Math.floor(Math.random() * 5) + 1,
+              wins: Math.floor(Math.random() * 2),
               coins: 0,
               weekKey: wk,
               _demo: true
             }));
-          const merged = [...existing, ...newEntries].slice(-30); // keep last 30 demo entries
+          
+          // Merge: keep this week + new entries, drop old weeks
+          const merged = [...thisWeekEntries, ...newEntries].slice(-5); // Max 5 per week
           localStorage.setItem(demoLbKey, JSON.stringify(merged));
           
-          // Also save demo users to Firestore leaderboard
-          if (window._firebaseDb && window._firebaseFns) {
-            try {
-              const db = window._firebaseDb;
-              const { doc, setDoc } = window._firebaseFns;
-              newEntries.forEach(entry => {
-                const docId = wk + '_' + entry.uid;
-                setDoc(doc(db, 'battleLeaderboard', docId), entry, { merge: true }).catch(e => {});
-                // Also save to all-time
-                setDoc(doc(db, 'battleLeaderboardAllTime', entry.uid), entry, { merge: true }).catch(e => {});
-              });
-            } catch(fbErr) {}
-          }
+          // ⚠️ DO NOT SAVE TO FIRESTORE — demo players should stay LOCAL ONLY
+          // This prevents mixing demo/real users in other people's leaderboards
         } catch(ex) {}
 
         const winnerEntry = sorted[0];
@@ -2020,6 +2027,7 @@
           this._renderActiveQuiz(data);
         } else if (data.status === 'finished') {
           this._stopPolling();
+          this._stopQuestionTimer();
           this._countdownShown = false;
           this._renderBattleWinner(data);
         } else {
@@ -2027,6 +2035,10 @@
         }
       } catch(e) {}
     },
+
+    /* ── Per-question 30s countdown timer ── */
+    _questionTimer: null,
+    _questionTimerQi: -1,
 
     /* ── Generating screen shown to all players while AI works ── */
     _genScreenStart: null,
@@ -2292,7 +2304,8 @@
             updateDoc(doc(db, 'publicBattles', battleId), {
               status: 'active',
               startedAt: Date.now(),
-              'quiz.status': 'active'
+              'quiz.status': 'active',
+              'quiz.questionStartedAt': Date.now(),
             }).catch(()=>{});
           }
           setTimeout(() => {
@@ -2323,6 +2336,8 @@
 
       const battleId = battle.id || this._activeBattleId;
 
+      const questionStartedAt = quiz.questionStartedAt || battle.startedAt || Date.now();
+
       body.innerHTML = `
         <div class="ba-active-wrap">
           <div class="ba-quiz-header">
@@ -2330,6 +2345,13 @@
             <span class="ba-quiz-xp-pill">⚡ ${quiz.xp && quiz.xp[myUid] ? quiz.xp[myUid] : 0} XP</span>
           </div>
           <div class="ba-quiz-bar"><div class="ba-quiz-bar-fill" style="width:${(qi/questions.length)*100}%"></div></div>
+          <div class="ba-quiz-timer-wrap">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span style="font-size:10px;font-weight:700;letter-spacing:0.06em;color:rgba(200,195,255,0.35);text-transform:uppercase;">⏱ Time</span>
+              <span id="ba-qtimer-label" style="font-size:11px;font-weight:800;color:rgba(200,195,255,0.5);">${QUESTION_TIME}s</span>
+            </div>
+            <div class="ba-quiz-timer-bar"><div id="ba-qtimer-fill" class="ba-quiz-timer-fill" style="width:100%"></div></div>
+          </div>
           <div class="ba-quiz-q-card"><div class="ba-quiz-q-label">Question</div><div class="ba-quiz-q">${q.q}</div></div>
           <div class="ba-quiz-opts">
             ${q.opts.map((o,j) => {
@@ -2357,6 +2379,13 @@
           }
           ${this._renderXPBoard(quiz, battle.playerNames)}
         </div>`;
+
+      // Start or continue the 30-second question timer (skip if already answered)
+      if (!answered) {
+        this._startQuestionTimer(battleId, qi, questionStartedAt);
+      } else {
+        this._stopQuestionTimer();
+      }
     },
 
     _renderXPBoard(quiz, playerNames) {
@@ -2373,6 +2402,83 @@
             <span class="ba-xp-val">${x} XP</span>
           </div>`).join('')}
       </div>`;
+    },
+
+    /* ── 30-second per-question countdown ── */
+    _stopQuestionTimer() {
+      if (this._questionTimer) {
+        clearInterval(this._questionTimer);
+        this._questionTimer = null;
+      }
+      this._questionTimerQi = -1;
+    },
+
+    _startQuestionTimer(battleId, qi, questionStartedAt) {
+      // Don't restart if already running for same question
+      if (this._questionTimerQi === qi && this._questionTimer) return;
+      this._stopQuestionTimer();
+      this._questionTimerQi = qi;
+
+      const startMs = questionStartedAt || Date.now();
+
+      const tick = () => {
+        const elapsed = Math.floor((Date.now() - startMs) / 1000);
+        const remaining = Math.max(0, QUESTION_TIME - elapsed);
+        const pct = (remaining / QUESTION_TIME) * 100;
+
+        // Update timer bar
+        const fill = document.getElementById('ba-qtimer-fill');
+        const label = document.getElementById('ba-qtimer-label');
+        if (fill) fill.style.width = pct + '%';
+        if (label) {
+          label.textContent = remaining + 's';
+          label.style.color = remaining <= 5 ? '#ef4444' : remaining <= 10 ? '#f59e0b' : 'rgba(200,195,255,0.5)';
+        }
+
+        if (remaining <= 0) {
+          this._stopQuestionTimer();
+          // Auto-skip: only the creator/first player advances the question in Firestore
+          // We use a lock key so only one client fires the skip
+          const skipKey = 'ba_skip_' + battleId + '_q' + qi;
+          if (!sessionStorage.getItem(skipKey)) {
+            sessionStorage.setItem(skipKey, '1');
+            this._autoSkipQuestion(battleId, qi);
+          }
+        }
+      };
+
+      tick(); // immediate first render
+      this._questionTimer = setInterval(tick, 1000);
+    },
+
+    async _autoSkipQuestion(battleId, qi) {
+      try {
+        const db = window._firebaseDb;
+        const { doc, getDoc, updateDoc } = window._firebaseFns;
+        const snap = await getDoc(doc(db, 'publicBattles', battleId));
+        if (!snap.exists()) return;
+        const battle = snap.data();
+        const quiz = battle.quiz || {};
+        // Only skip if still on the same question and not already answered
+        if (quiz.current !== qi) return;
+        const nextIdx = qi + 1;
+        const isLast = nextIdx >= (battle.questions || []).length;
+        const updates = {
+          ['quiz.current']: isLast ? qi : nextIdx,
+          ['quiz.status']: isLast ? 'finished' : 'active',
+          ['quiz.questionStartedAt']: isLast ? (quiz.questionStartedAt || Date.now()) : Date.now(),
+        };
+        if (isLast) {
+          updates.status = 'finished';
+          setTimeout(async () => {
+            try { const { doc: d2, deleteDoc } = window._firebaseFns; await deleteDoc(d2(window._firebaseDb, 'publicBattles', battleId)); } catch(_) {}
+          }, 30000);
+        }
+        await updateDoc(doc(db, 'publicBattles', battleId), updates);
+        if (isLast && this._activeBattleId) {
+          setTimeout(() => this._pollGameBattle(this._activeBattleId), 300);
+        }
+      } catch(e) {}
     },
 
     async _submitAnswer(battleId, qi, chosenIdx) {
@@ -2409,11 +2515,15 @@
           toast('❌ Wrong! ' + WRONG_XP + ' XP', 2000);
         }
 
+        // Stop the local countdown timer immediately
+        this._stopQuestionTimer();
+
         const updates = {
           ['quiz.answers.' + qi]: { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
           ['quiz.xp.' + myUid]: newXP,
           ['quiz.current']: isLast ? qi : nextIdx,
           ['quiz.status']: isLast ? 'finished' : 'active',
+          ['quiz.questionStartedAt']: isLast ? (quiz.questionStartedAt || Date.now()) : Date.now(),
         };
 
         if (isLast) {
@@ -2561,6 +2671,7 @@
         }
       }
       this._stopPolling();
+      this._stopQuestionTimer();
       this._activeBattleId = null;
       this._countdownShown = false;
       this._renderArena();
@@ -2845,13 +2956,14 @@
         try {
           const q = query(collection(db, 'battleLeaderboard'), where('weekKey','==',weekKey), orderBy('xp','desc'), limit(50));
           const snap = await getDocs(q);
-          weeklyEntries = snap.docs.map(d => d.data());
+          // Filter out demo entries from Firestore — only real users
+          weeklyEntries = snap.docs.map(d => d.data()).filter(e => !e._demo);
         } catch(e) {
           // Fallback without orderBy (composite index not ready yet)
           try {
             const q2 = query(collection(db, 'battleLeaderboard'), where('weekKey','==',weekKey));
             const snap2 = await getDocs(q2);
-            weeklyEntries = snap2.docs.map(d => d.data()).sort((a,b)=>b.xp-a.xp).slice(0,50);
+            weeklyEntries = snap2.docs.map(d => d.data()).filter(e => !e._demo).sort((a,b)=>b.xp-a.xp).slice(0,50);
           } catch(e2) {
             // Collection may not exist yet — treat as empty, show empty state
             weeklyEntries = [];
@@ -3094,11 +3206,12 @@
         try {
           const q = query(collection(db, 'battleLeaderboardAllTime'), orderBy('xp', 'desc'), limit(50));
           const snap = await getDocs(q);
-          entries = snap.docs.map(d => d.data());
+          // Filter out demo entries from Firestore — only real users
+          entries = snap.docs.map(d => d.data()).filter(e => !e._demo);
         } catch(e) {
           // Fallback without index
           const snap2 = await getDocs(collection(db, 'battleLeaderboardAllTime'));
-          entries = snap2.docs.map(d => d.data());
+          entries = snap2.docs.map(d => d.data()).filter(e => !e._demo);
         }
         
         // ── CRITICAL: Enrich entries with real user names from Firestore ──
