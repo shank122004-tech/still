@@ -2025,6 +2025,9 @@
           }
         } else if (data.status === 'active') {
           // FIX 2: clear flag so next battle works
+          // Remove countdown overlay if still visible (race condition)
+          const overlay = document.getElementById('ba-countdown-overlay');
+          if (overlay) overlay.remove();
           // Keep countdown shown flag true until we see active, preventing duplicate countdowns
           this._countdownShown = false;
           // Ensure we have full data with questions
@@ -2303,18 +2306,23 @@
 
       let count = 3;
       const numEl = overlay.querySelector('#ba-cdown-num');
+      const countdownStartTime = data.countdownAt || Date.now();
+      const countdownEndTime = countdownStartTime + 4000;
 
       const tick = () => {
-        count--;
-        if (count > 0) {
-          if (numEl) {
+        const remaining = Math.max(0, countdownEndTime - Date.now());
+        const countValue = remaining > 3000 ? 3 : (remaining > 2000 ? 2 : (remaining > 1000 ? 1 : 0));
+        
+        if (remaining > 0) {
+          if (countValue > 0 && countValue !== count && numEl) {
+            count = countValue;
             numEl.textContent = count;
             // Re-trigger animation
             numEl.style.animation = 'none';
             void numEl.offsetWidth;
             numEl.style.animation = 'ba-countpop 0.6s ease';
           }
-          setTimeout(tick, 1000);
+          setTimeout(tick, 100);
         } else {
           // Show "GO!"
           if (numEl) {
@@ -2331,6 +2339,7 @@
             updateDoc(doc(db, 'publicBattles', battleId), {
               status: 'active',
               startedAt: Date.now(),
+              questions: data.questions || [],
               quiz: {
                 status: 'active',
                 current: 0,
@@ -3989,7 +3998,7 @@
   /* Remove player from Firestore when they leave the waiting room */
   async function removePlayerFromBattle(battleId) {
     if (!battleId) return;
-    const myUid = uid();
+    const myUid = global._firebaseAuth?.currentUser?.uid || 'guest';
     try {
       const db  = window._firebaseDb;
       const fns = window._firebaseFns;
