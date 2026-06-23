@@ -1466,7 +1466,7 @@ async function _generateQuizQuestions(exam, count, type) {
           <div style="display:flex;gap:6px;flex-shrink:0;">
             ${isAdmin ? `<button class="cf-btn cf-btn-sm" style="background:rgba(16,185,129,0.2);color:#4ade80;border-color:rgba(74,222,128,0.3);" onclick="CF._openGroupDashboard('${g.id}')">📊</button>` : ''}
             ${isAdmin ? `<button class="cf-btn cf-btn-sm" onclick="CF._shareGroupCode('${inviteCode}','${(g.name||'').replace(/'/g,'')}')" title="Share invite code">📤</button>` : ''}
-            <button class="cf-btn cf-btn-sm cf-btn-primary" onclick="CF._openGroupChat('${g.id}')">⚔️ Battle Room →</button>
+            <button class="cf-btn cf-btn-sm cf-btn-primary" onclick="window._safeOpenGroupChat('${g.id}')">⚔️ Battle Room →</button>
           </div>
         </div>`;
     },
@@ -1622,7 +1622,7 @@ async function _generateQuizQuestions(exam, count, type) {
               <div style="font-size:28px;margin-bottom:8px;">🎉</div>
               <div style="font-size:14px;font-weight:800;color:#fff;margin-bottom:4px;">Joined "${g.name}"!</div>
               <div style="font-size:12px;color:rgba(200,195,255,0.6);margin-bottom:12px;">${(g.members||[]).length} members · Welcome aboard!</div>
-              <button class="cf-btn cf-btn-primary" style="width:100%;" onclick="CF._openGroupChat('${g.id}')">💬 Open Group Chat →</button>
+              <button class="cf-btn cf-btn-primary" style="width:100%;" onclick="window._safeOpenGroupChat('${g.id}')">💬 Open Group Chat →</button>
             </div>`;
         }
         setTimeout(() => CF._renderGroups(), 2500);
@@ -3041,8 +3041,8 @@ async function _generateQuizQuestions(exam, count, type) {
   };
 
   // Optimize polling to 800ms
-  const _origOGC = CF._openGroupChat && typeof CF._openGroupChat === 'function' ? CF._openGroupChat : null;
-  if (_origOGC) {
+  if (typeof CF._openGroupChat === 'function') {
+    const _origOGC = CF._openGroupChat;
     CF._openGroupChat = async function(groupId) {
       const result = await _origOGC.call(this, groupId);
       setTimeout(() => {
@@ -3056,32 +3056,32 @@ async function _generateQuizQuestions(exam, count, type) {
               const snap = await getDoc(doc(db, 'studyGroups', CF._currentGroupId));
               if (!snap.exists()) { if (typeof CF._stopChatPolling === 'function') CF._stopChatPolling(); return; }
               const data = snap.data();
-            const newHash = JSON.stringify({ quizStatus: data.quiz?.status, quizQ: data.quiz?.current, quizAnswers: Object.keys(data.quiz?.answers||{}).length, members: (data.members||[]).length });
-            if (newHash !== CF._chatPollHash) {
-              CF._chatPollHash = newHash;
-              CF._currentGroupData = data;
-              if (data.quiz?.status === 'countdown' && !CF._groupCountdownShown) {
-                if (typeof CF._handleGroupCountdown === 'function') CF._handleGroupCountdown(data, CF._currentGroupId);
-              } else if (data.quiz?.status === 'active') {
-                if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
-                if (typeof CF._renderQuizQuestion === 'function') CF._renderQuizQuestion(data.quiz, CF._currentGroupId, data.memberNames);
-                if (typeof CF._startGroupQuizTimer === 'function') CF._startGroupQuizTimer(CF._currentGroupId, data.quiz.current, data.quiz.questionStartedAt);
-              } else if (data.quiz?.status === 'finished') {
-                if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
-                if (typeof CF._renderQuizResults === 'function') CF._renderQuizResults(data.quiz, data.memberNames);
-              } else {
-                if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
-                if (typeof CF._renderGroupWaitingRoom === 'function') CF._renderGroupWaitingRoom(data, CF._currentGroupId, data.adminUid === (typeof uid === 'function' ? uid() : 'guest'));
-                const qa = document.getElementById('cf-quiz-area');
-                if (qa) qa.innerHTML = '';
+              const newHash = JSON.stringify({ quizStatus: data.quiz?.status, quizQ: data.quiz?.current, quizAnswers: Object.keys(data.quiz?.answers||{}).length, members: (data.members||[]).length });
+              if (newHash !== CF._chatPollHash) {
+                CF._chatPollHash = newHash;
+                CF._currentGroupData = data;
+                if (data.quiz?.status === 'countdown' && !CF._groupCountdownShown) {
+                  if (typeof CF._handleGroupCountdown === 'function') CF._handleGroupCountdown(data, CF._currentGroupId);
+                } else if (data.quiz?.status === 'active') {
+                  if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
+                  if (typeof CF._renderQuizQuestion === 'function') CF._renderQuizQuestion(data.quiz, CF._currentGroupId, data.memberNames);
+                  if (typeof CF._startGroupQuizTimer === 'function') CF._startGroupQuizTimer(CF._currentGroupId, data.quiz.current, data.quiz.questionStartedAt);
+                } else if (data.quiz?.status === 'finished') {
+                  if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
+                  if (typeof CF._renderQuizResults === 'function') CF._renderQuizResults(data.quiz, data.memberNames);
+                } else {
+                  if (typeof CF._stopGroupQuizTimer === 'function') CF._stopGroupQuizTimer();
+                  if (typeof CF._renderGroupWaitingRoom === 'function') CF._renderGroupWaitingRoom(data, CF._currentGroupId, data.adminUid === (typeof uid === 'function' ? uid() : 'guest'));
+                  const qa = document.getElementById('cf-quiz-area');
+                  if (qa) qa.innerHTML = '';
+                }
               }
-            }
-          } catch(e) {}
-        }, 1500);
-      }
-    }, 100);
-    return result;
-  };
+            } catch(e) {}
+          }, 1500);
+        }
+      }, 100);
+      return result;
+    };
   }
 
   // Live analytics dashboard for admin
@@ -3240,5 +3240,21 @@ async function _generateQuizQuestions(exam, count, type) {
   }
 
   global._CrackAI = { MockTest, WeakTopics, Analytics, DailyGoal, ScorePredictor, StudyGroups, Referral, XP, EXAM_CONFIGS };
+
+  /* Safe wrapper for CF._openGroupChat that handles delayed initialization */
+  global._safeOpenGroupChat = function(groupId) {
+    if (typeof CF !== 'undefined' && typeof CF._openGroupChat === 'function') {
+      CF._openGroupChat(groupId);
+    } else {
+      toast('⏳ Group chat loading...');
+      setTimeout(() => {
+        if (typeof CF !== 'undefined' && typeof CF._openGroupChat === 'function') {
+          CF._openGroupChat(groupId);
+        } else {
+          toast('❌ Could not load group chat');
+        }
+      }, 500);
+    }
+  };
 
 })(window);
