@@ -903,6 +903,10 @@ async function _generateQuizQuestions(exam, count, type) {
       const qs = await this.loadQuestions(exam, count);
       this._state.questions = qs;
       this._state.loading = false;
+      // Track usage ONLY when test actually starts (questions loaded)
+      if (typeof window.trackMockTestUsage === 'function') {
+        window.trackMockTestUsage();
+      }
       CF._renderMockQuestion();
     },
     answer(qi, ai) {
@@ -958,6 +962,11 @@ async function _generateQuizQuestions(exam, count, type) {
       return; // PYQ Bank feature removed
     },
     openMockTest() {
+      // Prevent multiple calls
+      if (this._mockTestOpening) return;
+      this._mockTestOpening = true;
+      setTimeout(() => { this._mockTestOpening = false; }, 100);
+      
       // Check 3 FREE daily access from strict-gate-patch
       if (typeof window.checkMockTestAccess === 'function') {
         window.checkMockTestAccess().then(access => {
@@ -970,8 +979,7 @@ async function _generateQuizQuestions(exam, count, type) {
           if (access.remaining !== undefined) {
             toast(`📝 You have ${access.remaining} free mock tests remaining today (3/day)`);
           }
-          // Track and open
-          if (typeof window.trackMockTestUsage === 'function') window.trackMockTestUsage();
+          // Track and open (only track on actual start, not on modal open)
           CF.openModal('cf-mock-modal');
           CF._renderMockTest();
         });
