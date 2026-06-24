@@ -1,23 +1,49 @@
 /**
- * strict-gate-patch.js — CrackAI Hard Paywall v1.3
- * Loads last (defer). Overrides all canSend*, model gates,
- * teacher gate, premium gates. 0 free chats, 3 free battles/day.
+ * strict-gate-patch.js — CrackAI Hard Paywall v1.4
+ * 0 free chats, 3 free mock tests/day, 3 free battles/day
+ * Backend premium verification from https://verifypayment-56khnynjia-uc.a.run.app
  */
 (function () {
   'use strict';
 
-  var FREE_TEXT  = 0;      // 0 free chats (require premium)
+  var FREE_TEXT  = 0;
   var FREE_IMAGE = 0;
   var FREE_PDF   = 0;
-  var FREE_BATTLES = 3;    // 3 free battles per day
+  var FREE_BATTLES = 3;
+  var FREE_MOCK_TESTS = 3;
+
+  /* ── Backend premium verification ─────────────────────────── */
+  window._premiumCache = { uid: null, status: null, lastCheck: 0, cacheDuration: 600000 };
+  
+  async function verifyPremiumBackend(uid) {
+    const now = Date.now();
+    if (window._premiumCache.uid === uid && (now - window._premiumCache.lastCheck) < window._premiumCache.cacheDuration) {
+      return window._premiumCache.status;
+    }
+    try {
+      const response = await fetch('https://verifypayment-56khnynjia-uc.a.run.app/verify?uid=' + uid);
+      const data = await response.json();
+      const isPrem = data.premium || data.isPremium || false;
+      window._premiumCache.uid = uid;
+      window._premiumCache.status = isPrem;
+      window._premiumCache.lastCheck = now;
+      localStorage.setItem('sscai_u:' + uid + ':premium', isPrem ? 'true' : 'false');
+      return isPrem;
+    } catch(e) {
+      return localStorage.getItem('sscai_u:' + uid + ':premium') === 'true';
+    }
+  }
 
   /* ── Safe isPremium check ─────────────────────────────────── */
-  function isPremium() {
+  async function isPremium() {
     try {
       var uid = window._firebaseAuth && window._firebaseAuth.currentUser
                   ? window._firebaseAuth.currentUser.uid : null;
-      var p = uid ? ('sscai_u:' + uid + ':') : 'sscai_guest:';
-      if (localStorage.getItem(p + 'premium') === 'true') {
+      if (!uid) return false;
+      
+      const backendStatus = await verifyPremiumBackend(uid);
+      if (backendStatus) {
+        localStorage.setItem('sscai_u:' + uid + ':premium', 'true');
         if (typeof state !== 'undefined') state.isPremium = true;
         return true;
       }
@@ -42,29 +68,51 @@
   window.showRewardPopup     = function () { openPremium(); };
   window.activateReward      = function () {};
 
-  /* ── canSend* functions (0 free = all require premium) ───────── */
-  function canText()  {
-    if (isPremium()) return true;
-    return false;  // 0 free
-  }
-  function canImage() {
-    if (isPremium()) return true;
-    return false;  // 0 free
-  }
-  function canPdf()   {
-    if (isPremium()) return true;
-    return false;  // 0 free
-  }
+  /* ── canSend* functions (0 free) ───────────────────────────── */
+  function canText()  { return false; }
+  function canImage() { return false; }
+  function canPdf()   { return false; }
 
   window.canSendText  = canText;
   window.canSendImage = canImage;
   window.canSendPdf   = canPdf;
 
-  /* ── handleLimitHit → always open premium modal ─────────── */
+  /* ── handleLimitHit ──────────────────────────────────────── */
   window.handleLimitHit = function (type) {
     var labels = { text: 'AI Chats require Premium (0 free)', image: 'Image chat requires Premium', pdf: 'PDF chat requires Premium' };
     try { if (typeof showToast === 'function') showToast('🔒 ' + (labels[type] || 'Upgrade Required') + ' — Start from ₹129/month'); } catch(e){}
     openPremium();
+  };
+
+  /* ── Mock Test limit (3 per day free) ────────────────────── */
+  window.checkMockTestAccess = async function() {
+    const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : 'guest';
+    const isPrem = await isPremium();
+    
+    if (isPrem) return { allowed: true, reason: 'Premium user' };
+    
+    const today = new Date().toISOString().split('T')[0];
+    const key = 'sscai_mock_' + today;
+    const count = parseInt(localStorage.getItem(key) || '0');
+    
+    if (count >= FREE_MOCK_TESTS) {
+      return { allowed: false, reason: '🔒 Daily mock test limit reached (3/day). Upgrade for unlimited.', limit: 3, used: count };
+    }
+    
+    return { allowed: true, used: count, limit: 3 };
+  };
+
+  /* ── Track mock test usage ──────────────────────────────── */
+  window.trackMockTestUsage = function() {
+    const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : 'guest';
+    const isPrem = localStorage.getItem('sscai_u:' + uid + ':premium') === 'true';
+    
+    if (!isPrem) {
+      const today = new Date().toISOString().split('T')[0];
+      const key = 'sscai_mock_' + today;
+      const count = parseInt(localStorage.getItem(key) || '0');
+      localStorage.setItem(key, (count + 1).toString());
+    }
   };
 
   /* ── Patch sendMessage ────────────────────────────────────── */
@@ -89,7 +137,8 @@
 
   /* ── Battle access gate (3 per day free) ─────────────────── */
   window.checkBattleAccess = function() {
-    if (isPremium()) return true;
+    const isPrem = localStorage.getItem('sscai_u:' + ((typeof uid === 'function') ? uid() : 'guest') + ':premium') === 'true';
+    if (isPrem) return true;
     try {
       var today = new Date().toISOString().split('T')[0];
       var key = 'sscai_battles_' + today;
@@ -112,7 +161,8 @@
       if (!opt) return;
       var model = opt.dataset.model;
       if (GATED_MODELS.indexOf(model) === -1) return;
-      if (isPremium()) return;
+      const isPrem = localStorage.getItem('sscai_u:' + ((typeof uid === 'function') ? uid() : 'guest') + ':premium') === 'true';
+      if (isPrem) return;
       e.stopImmediatePropagation();
       try { if (typeof showToast === 'function') showToast('🔒 ' + model + ' requires Premium'); } catch(ex){}
       openPremium();
@@ -124,7 +174,8 @@
   function restoreTeacherGate() {
     try {
       window.__teacherAlwaysFree = false;
-      if (!isPremium()) localStorage.removeItem('sscai_teacher_unlocked');
+      const isPrem = localStorage.getItem('sscai_u:' + ((typeof uid === 'function') ? uid() : 'guest') + ':premium') === 'true';
+      if (!isPrem) localStorage.removeItem('sscai_teacher_unlocked');
       window.openTeacherPaywall = function () {
         try { if (typeof showToast === 'function') showToast('🔒 Teacher Mode requires Premium'); } catch(ex){}
         openPremium();
@@ -172,61 +223,51 @@
     try { if (typeof _origUpdateLimitUI === 'function') _origUpdateLimitUI(); } catch(e){}
     try {
       var el = document.getElementById('messageLimitInfo');
-      if (!el || isPremium()) return;
+      if (!el) return;
+      const isPrem = localStorage.getItem('sscai_u:' + ((typeof uid === 'function') ? uid() : 'guest') + ':premium') === 'true';
+      if (isPrem) return;
       el.innerHTML = '<span style="color:#ef4444;font-size:11px;">🔒 AI Chats require Premium (₹129–1699/mo) · <a href="#" onclick="openPremiumModal&&openPremiumModal();return false;" style="color:#f59e0b;text-decoration:none;font-weight:600;">Upgrade ⭐</a></span>';
     } catch(e) {}
   };
 
-  /* ── Periodic re-enforcement every 10s ──*/
+  /* ── Periodic re-enforcement ──*/
   let _lastGatePremiumState = null;
   setInterval(function () {
     if (document.visibilityState === 'hidden') return;
-    var prem = isPremium();
+    const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
+    if (uid) verifyPremiumBackend(uid).catch(() => {});
+    
     if (window.canSendText  !== canText)  window.canSendText  = canText;
     if (window.canSendImage !== canImage) window.canSendImage = canImage;
     if (window.canSendPdf   !== canPdf)   window.canSendPdf   = canPdf;
     window.isRewardActive = function () { return false; };
-    if (!prem && localStorage.getItem('sscai_teacher_unlocked') === 'true') {
-      localStorage.removeItem('sscai_teacher_unlocked');
-    }
-    if (prem !== _lastGatePremiumState) {
-      _lastGatePremiumState = prem;
-      if (prem && typeof updateLimitUI === 'function') updateLimitUI();
-    }
   }, 10000);
 
-  console.info('[StrictGate] v1.3 — 0 free chats, 3 free battles/day, premium from ₹129');
+  console.info('[StrictGate] v1.4 — 0 free chats, 3 free mock tests/day, 3 free battles/day, backend verification enabled');
 
 })();
 
 /* ── Premium check for Mock Test ── */
 (function patchCFMockTest() {
-  function robustIsPremium() {
-    try {
-      var uid = window._firebaseAuth && window._firebaseAuth.currentUser
-                  ? window._firebaseAuth.currentUser.uid : null;
-      if (uid && localStorage.getItem('sscai_u:' + uid + ':premium') === 'true') return true;
-      if (localStorage.getItem('sscai_u:guest:premium') === 'true') return true;
-      if (typeof state !== 'undefined' && state.isPremium) return true;
-      return false;
-    } catch (e) { return false; }
-  }
-
   function patch() {
     if (!window.CF || typeof window.CF.openModal !== 'function') {
       setTimeout(patch, 200);
       return;
     }
-    window.CF.openMockTest = function () {
-      if (!robustIsPremium()) {
-        try { if (typeof showToast === 'function') showToast('🔒 Mock Test requires Premium (₹129+/mo)'); } catch(e){}
+    const _orig = window.CF.openMockTest;
+    window.CF.openMockTest = async function () {
+      const access = await window.checkMockTestAccess();
+      if (!access.allowed) {
+        try { if (typeof showToast === 'function') showToast(access.reason); } catch(e){}
         try { if (typeof openPremiumModal === 'function') openPremiumModal(); } catch(e){}
         return;
       }
+      window.trackMockTestUsage();
+      if (typeof _orig === 'function') return _orig.call(this);
       window.CF.openModal('cf-mock-modal');
-      window.CF._renderMockTest();
+      if (typeof window.CF._renderMockTest === 'function') window.CF._renderMockTest();
     };
-    console.info('[StrictGate] Mock Test gated to premium');
+    console.info('[StrictGate] Mock Test gated to 3/day + premium');
   }
   patch();
 })();
