@@ -235,8 +235,10 @@
       const today = new Date().toISOString().split('T')[0];
       const key = 'sscai_battles_' + today + '_' + uid;
       const count = parseInt(localStorage.getItem(key) || '0');
-      localStorage.setItem(key, (count + 1).toString());
-      const newCount = count + 1;
+      if (count < FREE_BATTLES) {
+        localStorage.setItem(key, (count + 1).toString());
+      }
+      const newCount = Math.min(count + 1, FREE_BATTLES);
       const remaining = Math.max(0, FREE_BATTLES - newCount);
       try { if (typeof showToast === 'function') showToast(`⚔️ Battle Joined · Used 1/3 · ${remaining} remaining today`); } catch(e){}
     }
@@ -399,6 +401,33 @@
   setInterval(function() {
     window.updateLimitUI();
   }, 5000);
+
+  /* ── Voice/Microphone Premium Gate ──────────────────────────── */
+  function patchVoiceGate() {
+    const voiceBtn = document.getElementById('voiceInputBtn');
+    if (!voiceBtn || voiceBtn._voiceGateBound) return;
+    voiceBtn._voiceGateBound = true;
+    voiceBtn.addEventListener('click', function(e) {
+      const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
+      const isPrem = uid ? (localStorage.getItem('sscai_u:' + uid + ':premium') === 'true') : false;
+      
+      if (!isPrem) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        try { if (typeof showToast === 'function') showToast('🔒 Voice input requires Premium'); } catch(e){}
+        openPremium();
+        return false;
+      }
+    }, true);
+  }
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', patchVoiceGate);
+  } else {
+    patchVoiceGate();
+  }
+  setTimeout(patchVoiceGate, 800);
+  setTimeout(patchVoiceGate, 2500);
 
   /* ── On login: sync premium status from Firestore ──────────– */
   if (typeof window._firebaseAuth !== 'undefined') {
