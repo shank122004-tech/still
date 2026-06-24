@@ -3158,7 +3158,7 @@
           }
         }
 
-        // ── CRITICAL: Enrich entries with real user names from Firestore ──
+        // ── CRITICAL: Enrich entries with real user names AND avatars from Firestore ──
         // If an entry has uid but no/empty name, fetch from users/{uid} document
         const enrichedEntries = [];
         for (const e of weeklyEntries) {
@@ -3176,6 +3176,10 @@
                 } else if (userData.email) {
                   const prefix = userData.email.split('@')[0];
                   entry.name = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+                }
+                // Also fetch photoURL (avatar) from users collection if not in entry
+                if (!entry.photoURL && userData.photoURL) {
+                  entry.photoURL = userData.photoURL;
                 }
               }
             } catch(err) {}
@@ -3402,7 +3406,7 @@
           entries = snap2.docs.map(d => d.data()).filter(e => !e._demo);
         }
         
-        // ── CRITICAL: Enrich entries with real user names from Firestore ──
+        // ── CRITICAL: Enrich entries with real user names AND avatars from Firestore ──
         // If an entry has uid but no/empty name, fetch from users/{uid} document
         const enrichedEntries = [];
         for (const e of entries) {
@@ -3420,6 +3424,10 @@
                 } else if (userData.email) {
                   const prefix = userData.email.split('@')[0];
                   entry.name = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+                }
+                // Also fetch photoURL (avatar) from users collection if not in entry
+                if (!entry.photoURL && userData.photoURL) {
+                  entry.photoURL = userData.photoURL;
                 }
               }
             } catch(err) {}
