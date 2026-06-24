@@ -33,8 +33,8 @@
     battle:           { id: 'battle',           name: 'Battle Creator Basic',    price: 99,   emoji: '⚔️', battleMonthly: 5, features: ['CrackAI Pro', '5 Battles/Month'] },
     battle_pro:       { id: 'battle_pro',       name: 'Battle Creator Pro',      price: 299,  emoji: '⚔️', battleMonthly: 19, features: ['CrackAI Pro', '19 Battles/Month'] },
     battle_academy:   { id: 'battle_academy',   name: 'Battle Creator Academy',  price: 499,  emoji: '⚔️', battleMonthly: 29, features: ['CrackAI Pro', '29 Battles/Month'] },
-    battle_extra_10:  { id: 'battle_extra_10',  name: '+10 Battle Creations',    price: 49,   emoji: '⚔️', isAddon: true, battleCredits: 10 },
-    battle_extra_25:  { id: 'battle_extra_25',  name: '+25 Battle Creations',    price: 99,   emoji: '⚔️', isAddon: true, battleCredits: 25 },
+    battle_extra_3:   { id: 'battle_extra_3',   name: '+3 Battle Creations',     price: 49,   emoji: '⚔️', isAddon: true, battleCredits: 3 },
+    battle_extra_7:   { id: 'battle_extra_7',   name: '+7 Battle Creations',     price: 99,   emoji: '⚔️', isAddon: true, battleCredits: 7 },
     // Study Group & Coaching plans (admin pays, members join free)
     group_leader:     { id: 'group_leader',     name: 'Group Leader',            price: 99,   emoji: '👥', features: ['CrackAI Pro', 'Unlimited Groups'] },
     coaching_basic:   { id: 'coaching_basic',   name: 'Coaching Plan Basic',     price: 499,  emoji: '🎓', features: ['CrackAI Pro', 'Unlimited Coaching'] },
@@ -45,8 +45,8 @@
     vision_pro_addon: { name: 'PrepAI Vision Pro',   price: 49,  emoji: '🔬' },
     prepaipro_addon:  { name: 'PrepAI Pro',           price: 49,  emoji: '✨' },
     v4pro_addon:      { name: 'PrepAI V4 Pro',         price: 149, emoji: '🚀' },
-    battle_extra_10:  { name: '+10 Battle Creations', price: 49,  emoji: '⚔️', isAddon: true, battleCredits: 10 },
-    battle_extra_25:  { name: '+25 Battle Creations', price: 99,  emoji: '⚔️', isAddon: true, battleCredits: 25 },
+    battle_extra_3:  { name: '+3 Battle Creations', price: 49,  emoji: '⚔️', isAddon: true, battleCredits: 3 },
+    battle_extra_7:  { name: '+7 Battle Creations', price: 99,  emoji: '⚔️', isAddon: true, battleCredits: 7 },
   };
 
   /* ── Battle Extra Credits helpers ── */
@@ -461,7 +461,7 @@
       setTimeout(() => { if (typeof showPersonaSelector === 'function') showPersonaSelector(); }, 800);
     }
     // Battle extra creation packs
-    if (planId === 'battle_extra_10' || planId === 'battle_extra_25') {
+    if (planId === 'battle_extra_3' || planId === 'battle_extra_7') {
       const credits = addon.battleCredits || 0;
       addBattleExtraCreditsToStorage(credits);
       toast('⚔️ ' + credits + ' battle creations added to your account!', 4000);
@@ -863,11 +863,11 @@
     <div id="upgBattleExtras" style="display:none;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.3);border-radius:14px;padding:14px;margin-bottom:14px;">
       <div style="font-size:12px;font-weight:700;color:rgba(200,195,255,0.8);margin-bottom:10px;">⚔️ Extra Battle Packs (Never Expire)</div>
       <div style="display:flex;gap:8px;">
-        <button onclick="handlePayment('battle_extra_10')" style="flex:1;padding:12px 8px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:11px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;text-align:center;">
-          ⚔️ +10 Battles<br><span style="font-size:16px;color:#f59e0b;font-weight:800;">₹49</span>
+        <button onclick="handlePayment('battle_extra_3')" style="flex:1;padding:12px 8px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:11px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;text-align:center;">
+          ⚔️ +3 Battles<br><span style="font-size:16px;color:#f59e0b;font-weight:800;">₹49</span>
         </button>
-        <button onclick="handlePayment('battle_extra_25')" style="flex:1;padding:12px 8px;background:linear-gradient(135deg,rgba(239,68,68,0.15),rgba(245,158,11,0.12));border:1.5px solid rgba(245,158,11,0.45);border-radius:11px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;text-align:center;">
-          ⚔️⚔️ +25 Battles<br><span style="font-size:16px;color:#f59e0b;font-weight:800;">₹99</span>
+        <button onclick="handlePayment('battle_extra_7')" style="flex:1;padding:12px 8px;background:linear-gradient(135deg,rgba(239,68,68,0.15),rgba(245,158,11,0.12));border:1.5px solid rgba(245,158,11,0.45);border-radius:11px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;text-align:center;">
+          ⚔️⚔️ +7 Battles<br><span style="font-size:16px;color:#f59e0b;font-weight:800;">₹99</span><br><span style="font-size:9px;color:#f59e0b;">BEST VALUE</span>
         </button>
       </div>
     </div>` : ''}
