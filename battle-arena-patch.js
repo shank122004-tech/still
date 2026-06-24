@@ -2644,23 +2644,24 @@
         const isLast     = nextIdx >= battle.questions.length;
         const questionStartTs = Date.now();
 
-        // ── OPTIMISTIC UI: apply result immediately without waiting for Firestore ──
+        // ── INSTANT UI FEEDBACK: apply result immediately without delay ──
         this._stopQuestionTimer();
-        // Mark chosen option correct/wrong immediately in DOM
+        // Mark chosen option correct/wrong INSTANTLY in DOM
         const opts = document.querySelectorAll('.ba-quiz-opt');
         opts.forEach((btn, j) => {
           btn.disabled = true;
           btn.onclick = null;
+          btn.classList.remove('correct', 'wrong', 'dim');
           if (j === q.ans) btn.classList.add('correct');
           else if (j === chosenIdx && j !== q.ans) btn.classList.add('wrong');
           else btn.classList.add('dim');
         });
-        // Show result banner
+        // Show result banner INSTANTLY with animation
         const waiting = document.querySelector('.ba-quiz-waiting');
         if (waiting) {
           const answer = q.opts[q.ans] || '';
           waiting.outerHTML = `
-            <div class="ba-quiz-answered-banner ${correct ? 'correct' : 'wrong'}">
+            <div class="ba-quiz-answered-banner ${correct ? 'correct' : 'wrong'}" style="animation: ba-pop-in 0.15s ease;">
               ${correct ? '✅ Correct! <b>+10 XP</b>' : `❌ Wrong! Answer: <b>${answer}</b>`}
             </div>
             ${q.exp ? `<div class="ba-quiz-exp">💡 ${q.exp}</div>` : ''}`;
@@ -2690,6 +2691,8 @@
 
         if (isLast) {
           await this._saveToLeaderboard(myUid, myName, newXP);
+          // TRACK BATTLE WIN: Only top-3 placements count as wins
+          await this._trackBattleWin(battleId, myUid, myName, newXP, battle.quiz?.xp || {});
         }
 
       } catch(e) {
@@ -2698,13 +2701,41 @@
 
       this._answerSubmitting = false;
 
-      // Aggressive re-poll so next question shows fast for all clients
+      // AGGRESSIVE re-poll: 50ms, 150ms, 300ms for instant next question
       if (this._activeBattleId) {
         const bid = this._activeBattleId;
-        setTimeout(() => this._pollGameBattle(bid), 80);
+        setTimeout(() => this._pollGameBattle(bid), 50);
+        setTimeout(() => this._pollGameBattle(bid), 150);
         setTimeout(() => this._pollGameBattle(bid), 300);
-        setTimeout(() => this._pollGameBattle(bid), 600);
       }
+    },
+
+    // ── Track battle win in Firestore ──
+    async _trackBattleWin(battleId, myUid, myName, finalXP, allXP) {
+      const db = window._firebaseDb;
+      const { doc, updateDoc, increment } = window._firebaseFns;
+      if (!db || !updateDoc || !myUid) return;
+
+      try {
+        const entries = Object.entries(allXP || {}).sort((a, b) => b[1] - a[1]);
+        const myRank = entries.findIndex(([u]) => u === myUid);
+        const totalPlayers = entries.length;
+
+        // Only count wins if top-3 OR sole participant
+        if (myRank < 3 || totalPlayers === 1) {
+          await updateDoc(doc(db, 'users', myUid), {
+            battleWins: increment(1),
+            lastBattleWon: Date.now(),
+            lastBattleRank: myRank,
+            totalBattlesPlayed: increment(1),
+          });
+        } else {
+          // Track participation only
+          await updateDoc(doc(db, 'users', myUid), {
+            totalBattlesPlayed: increment(1),
+          });
+        }
+      } catch (e) {}
     },
 
     /* ── Winner screen ── */
@@ -2719,13 +2750,23 @@
       const playerNames = battle.playerNames || {};
       const players = (battle.players || []).length;
 
-      // Coins: 1st=25, 2nd=18, 3rd=8, all other participants=2
+      // Coins: PROFESSIONAL TIERED MODEL
       const myRank = sorted.findIndex(([u]) => u === myUid);
       let coinsWon = 0;
-      if (myRank === 0) coinsWon = 25;
-      else if (myRank === 1) coinsWon = 18;
-      else if (myRank === 2) coinsWon = 8;
-      else if (myRank >= 3) coinsWon = 2; // participation reward
+      
+      if (players >= 10) {
+        if (myRank === 0) coinsWon = 25;      // 1st place
+        else if (myRank === 1) coinsWon = 18; // 2nd place
+        else if (myRank === 2) coinsWon = 8;  // 3rd place
+        else if (myRank >= 3) coinsWon = 2;   // Participation
+      } else if (players >= 5) {
+        if (myRank === 0) coinsWon = 25;
+        else if (myRank === 1) coinsWon = 15;
+        else if (myRank >= 2) coinsWon = 2;
+      } else if (players >= 2) {
+        if (myRank === 0) coinsWon = 20;
+        else coinsWon = 2;
+      }
       const awardKey = 'ba_coins_' + (battle.id || this._activeBattleId) + '_' + myUid;
       if (coinsWon > 0 && !localStorage.getItem(awardKey)) {
         localStorage.setItem(awardKey, '1');
@@ -4118,25 +4159,40 @@
   window._hasQuitBattle = hasQuitBattle;
   window._markBattleQuit = markBattleQuit;
 
-  /* Remove player from Firestore when they leave the waiting room */
+  /* Remove player from Firestore completely when they leave the battle */
   async function removePlayerFromBattle(battleId) {
     if (!battleId) return;
-    const myUid = global._firebaseAuth?.currentUser?.uid || 'guest';
+    const myUid = global._firebaseAuth?.currentUser?.uid || window._firebaseAuth?.currentUser?.uid || 'guest';
+    if (!myUid || myUid === 'guest') return;  // Don't remove if no valid UID
+    
     try {
       const db  = window._firebaseDb;
       const fns = window._firebaseFns;
       if (!db || !fns) return;
+      
       const { doc, getDoc, updateDoc, arrayRemove, deleteField } = fns;
       const snap = await getDoc(doc(db, 'publicBattles', battleId));
       if (!snap.exists()) return;
+      
       const battle = snap.data();
-      // Don't remove if already started, or if this user is the creator
-      if (['active', 'countdown', 'generating', 'finished'].includes(battle.status)) return;
+      
+      // GUARD: Only remove from waiting battles, not active ones
+      if (['active', 'countdown', 'generating', 'finished'].includes(battle.status)) {
+        return;  // Can't remove from active battle
+      }
+      
+      // Don't remove creator
       if (battle.creatorUid === myUid) return;
-      const updates = { players: arrayRemove(myUid) };
+      
+      // Remove from players array AND playerNames map
+      const updates = { 
+        players: arrayRemove(myUid)
+      };
+      
       if (typeof deleteField === 'function') {
         updates[`playerNames.${myUid}`] = deleteField();
       }
+      
       await updateDoc(doc(db, 'publicBattles', battleId), updates);
     } catch (_) {}
   }
