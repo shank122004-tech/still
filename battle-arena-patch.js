@@ -1625,7 +1625,7 @@
         const sorted = Object.entries(demoState.xp).sort((a,b)=>b[1]-a[1]);
         const myRank = sorted.findIndex(([u]) => u === myUid);
         const myXP   = demoState.xp[myUid] || 0;
-        let coinsWon = myRank === 0 ? 50 : myRank === 1 ? 30 : myRank === 2 ? 15 : 0;
+        let coinsWon = myRank === 0 ? 25 : myRank === 1 ? 18 : myRank === 2 ? 8 : myRank >= 3 ? 2 : 0;
         if (coinsWon > 0) {
           const awardKey = 'ba_coins_demo_' + demoId + '_' + myUid;
           if (!localStorage.getItem(awardKey)) {
@@ -2062,6 +2062,11 @@
           // Remove countdown overlay if still visible (race condition)
           const overlay = document.getElementById('ba-countdown-overlay');
           if (overlay) overlay.remove();
+          // Only reset countdownShown AFTER overlay is gone (handled by _handleCountdown's own cleanup)
+          // Don't reset here if countdown is still animating
+          if (!this._countdownShown) {
+            // not mid-countdown — safe to proceed
+          }
           this._countdownShown = false;
           if (!data.questions || data.questions.length === 0) {
             setTimeout(() => this._pollGameBattle(battleId), 200);
@@ -2328,11 +2333,19 @@
     _countdownLastShownAt: 0,
     _handleCountdown(data, battleId) {
       if (this._countdownShown) return;
-      // Skip if we showed countdown less than 5 seconds ago (debounce)
-      if (Date.now() - this._countdownLastShownAt < 5000) return;
+      // Skip if we showed countdown less than 6 seconds ago (debounce)
+      if (Date.now() - this._countdownLastShownAt < 6000) return;
+      // Also guard: don't show if overlay already in DOM
+      if (document.getElementById('ba-countdown-overlay')) return;
       
       this._countdownShown = true;
       this._countdownLastShownAt = Date.now();
+
+      // PAUSE the poll interval while countdown is running to prevent re-entry
+      if (this._pollGameInterval) {
+        clearInterval(this._pollGameInterval);
+        this._pollGameInterval = null;
+      }
 
       // Show fullscreen overlay
       const overlay = document.createElement('div');
@@ -2356,14 +2369,12 @@
           if (countValue > 0 && countValue !== count && numEl) {
             count = countValue;
             numEl.textContent = count;
-            // Re-trigger animation
             numEl.style.animation = 'none';
             void numEl.offsetWidth;
             numEl.style.animation = 'ba-countpop 0.6s ease';
           }
           setTimeout(tick, 100);
         } else {
-          // Show "GO!"
           if (numEl) {
             numEl.textContent = 'GO!';
             numEl.style.animation = 'none';
@@ -2390,8 +2401,12 @@
           }
           setTimeout(() => {
             overlay.remove();
-            // Don't reset _countdownShown here - let polling reset it when status becomes 'active'
-            // This prevents duplicate countdowns from polling reading stale 'countdown' status
+            // Reset flag ONLY after overlay is removed
+            this._countdownShown = false;
+            // Resume polling now that countdown is done
+            if (!this._pollGameInterval && this._activeBattleId) {
+              this._pollGameInterval = setInterval(() => this._pollGameBattle(battleId), POLL_ACTIVE_GAME);
+            }
             this._pollGameBattle(battleId);
           }, 800);
         }
@@ -2494,16 +2509,23 @@
     },
 
     _renderXPBoard(quiz, playerNames) {
+      // Build entries from ALL joined players (playerNames), not just those with XP
       const xp = quiz.xp || {};
-      const entries = Object.entries(xp).sort((a,b) => b[1]-a[1]);
-      if (!entries.length) return '';
+      const names = playerNames || {};
+      // Merge: all named players, defaulting XP to 0
+      const allEntries = Object.entries(names).map(([u, name]) => [u, xp[u] || 0]);
+      // Also include anyone who has XP but might not be in playerNames
+      Object.entries(xp).forEach(([u, x]) => { if (!names[u]) allEntries.push([u, x]); });
+      // Sort by XP descending
+      allEntries.sort((a,b) => b[1]-a[1]);
+      if (!allEntries.length) return '';
       const myUid = uid();
       return `<div class="ba-xp-board">
         <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;color:rgba(200,195,255,0.4);text-transform:uppercase;margin-bottom:8px;">⚡ Live XP Board</div>
-        ${entries.map(([u,x],i) => `
+        ${allEntries.map(([u,x],i) => `
           <div class="ba-xp-row ${u===myUid?'me':''}">
             <span class="ba-xp-rank">${['🥇','🥈','🥉'][i]||'#'+(i+1)}</span>
-            <span class="ba-xp-name">${(playerNames&&playerNames[u])||'Player'}</span>
+            <span class="ba-xp-name">${(names[u])||'Player'}</span>
             <span class="ba-xp-val">${x} XP</span>
           </div>`).join('')}
       </div>`;
@@ -2593,18 +2615,26 @@
       const myUid = uid();
       const myName = getMyName();
 
+      // ── GUARD: prevent double-submit via UI flag ──
+      if (this._answerSubmitting) return;
+      this._answerSubmitting = true;
+
       try {
         const snap = await getDoc(doc(db, 'publicBattles', battleId));
-        if (!snap.exists()) return;
+        if (!snap.exists()) { this._answerSubmitting = false; return; }
         const battle = snap.data();
         const quiz = battle.quiz || {};
 
-        if (quiz.answers && quiz.answers[qi]) return; // already answered
-        if (quiz.current !== qi) return; // stale
+        // Already answered check — use string key (Firestore stores as strings)
+        if (quiz.answers && (quiz.answers[qi] || quiz.answers[String(qi)])) {
+          this._answerSubmitting = false;
+          return;
+        }
+        if (quiz.current !== qi) { this._answerSubmitting = false; return; }
 
         const q = battle.questions[qi];
+        if (!q) { this._answerSubmitting = false; return; }
         const correct = chosenIdx === q.ans;
-        // FIX 5: -3 XP for wrong answer (floor at 0)
         const CORRECT_XP = 10;
         const WRONG_XP   = -3;
         const xpDelta    = correct ? CORRECT_XP : WRONG_XP;
@@ -2612,21 +2642,32 @@
         const newXP      = Math.max(0, currentXP + xpDelta);
         const nextIdx    = qi + 1;
         const isLast     = nextIdx >= battle.questions.length;
-
-        // Optimistic UI
-        if (correct) {
-          toast('✅ Correct! +' + CORRECT_XP + ' XP', 2000);
-          addBattleXP(CORRECT_XP);
-        } else {
-          toast('❌ Wrong! ' + WRONG_XP + ' XP', 2000);
-        }
-
-        // Stop the local countdown timer immediately
-        this._stopQuestionTimer();
-
-        // Set question started time to NOW for accurate timing on all clients
         const questionStartTs = Date.now();
 
+        // ── OPTIMISTIC UI: apply result immediately without waiting for Firestore ──
+        this._stopQuestionTimer();
+        // Mark chosen option correct/wrong immediately in DOM
+        const opts = document.querySelectorAll('.ba-quiz-opt');
+        opts.forEach((btn, j) => {
+          btn.disabled = true;
+          btn.onclick = null;
+          if (j === q.ans) btn.classList.add('correct');
+          else if (j === chosenIdx && j !== q.ans) btn.classList.add('wrong');
+          else btn.classList.add('dim');
+        });
+        // Show result banner
+        const waiting = document.querySelector('.ba-quiz-waiting');
+        if (waiting) {
+          const answer = q.opts[q.ans] || '';
+          waiting.outerHTML = `
+            <div class="ba-quiz-answered-banner ${correct ? 'correct' : 'wrong'}">
+              ${correct ? '✅ Correct! <b>+10 XP</b>' : `❌ Wrong! Answer: <b>${answer}</b>`}
+            </div>
+            ${q.exp ? `<div class="ba-quiz-exp">💡 ${q.exp}</div>` : ''}`;
+        }
+        if (correct) addBattleXP(CORRECT_XP);
+
+        // ── WRITE to Firestore (background — UI already updated) ──
         const updates = {
           ['quiz.answers.' + String(qi)]: { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
           ['quiz.xp.' + myUid]: newXP,
@@ -2634,21 +2675,19 @@
           ['quiz.status']: isLast ? 'finished' : 'active',
           ['quiz.questionStartedAt']: isLast ? (quiz.questionStartedAt || questionStartTs) : questionStartTs,
         };
-
         if (isLast) {
           updates.status = 'finished';
-          // FIX 6: schedule auto-delete of finished battle after 30s
-          // so it disappears from the arena list for all users
           setTimeout(async () => {
-            try {
-              const { doc: d2, deleteDoc } = window._firebaseFns;
-              await deleteDoc(d2(window._firebaseDb, 'publicBattles', battleId));
-            } catch(_) {}
-          }, 30000);        }
+            try { const { doc: d2, deleteDoc } = window._firebaseFns; await deleteDoc(d2(window._firebaseDb, 'publicBattles', battleId)); } catch(_) {}
+          }, 30000);
+        }
+
+        // Clear render hash so next poll re-renders with new question
+        this._lastRenderHash = null;
+        this._lastRenderedQi = -1;
 
         await updateDoc(doc(db, 'publicBattles', battleId), updates);
 
-        // If last question, save to leaderboard
         if (isLast) {
           await this._saveToLeaderboard(myUid, myName, newXP);
         }
@@ -2657,13 +2696,14 @@
         toast('❌ Submit error. Check connection.', 2000);
       }
 
-      // FIX 3: aggressive re-polling so next question shows instantly
-      // Poll at 100ms, 250ms, 400ms to catch Firestore update quickly
+      this._answerSubmitting = false;
+
+      // Aggressive re-poll so next question shows fast for all clients
       if (this._activeBattleId) {
-        const battleId = this._activeBattleId;
-        setTimeout(() => this._pollGameBattle(battleId), 100);
-        setTimeout(() => this._pollGameBattle(battleId), 250);
-        setTimeout(() => this._pollGameBattle(battleId), 400);
+        const bid = this._activeBattleId;
+        setTimeout(() => this._pollGameBattle(bid), 80);
+        setTimeout(() => this._pollGameBattle(bid), 300);
+        setTimeout(() => this._pollGameBattle(bid), 600);
       }
     },
 
@@ -2679,19 +2719,13 @@
       const playerNames = battle.playerNames || {};
       const players = (battle.players || []).length;
 
-      // FIX 4: award coins once per battle per user
+      // Coins: 1st=25, 2nd=18, 3rd=8, all other participants=2
       const myRank = sorted.findIndex(([u]) => u === myUid);
       let coinsWon = 0;
-      if (players >= 10) {
-        if (myRank === 0) coinsWon = 50;
-        else if (myRank === 1) coinsWon = 30;
-        else if (myRank === 2) coinsWon = 15;
-      } else if (players >= 5) {
-        if (myRank === 0) coinsWon = 50;
-        else if (myRank === 1) coinsWon = 30;
-      } else {
-        if (myRank === 0) coinsWon = 50;
-      }
+      if (myRank === 0) coinsWon = 25;
+      else if (myRank === 1) coinsWon = 18;
+      else if (myRank === 2) coinsWon = 8;
+      else if (myRank >= 3) coinsWon = 2; // participation reward
       const awardKey = 'ba_coins_' + (battle.id || this._activeBattleId) + '_' + myUid;
       if (coinsWon > 0 && !localStorage.getItem(awardKey)) {
         localStorage.setItem(awardKey, '1');
@@ -4900,12 +4934,19 @@
     global.BA._renderActiveQuiz = function(battle) {
       _origRenderActiveQuiz(battle);
 
-      // Append live chat bar to quiz body
+      // Append live chat bar to quiz body — but ONLY ONCE per question render
+      // (the inner _origRenderActiveQuiz has a hash-guard and may return early,
+      //  so we check whether the body was actually re-rendered by looking for
+      //  a fresh wrapper that has NO chat bar yet)
       const body = document.getElementById('ba-body');
       if (!body) return;
 
+      // Skip if ELO bar already present in this render (prevents duplicate stacking)
+      if (body.querySelector('.ba-elo-chat-bar')) return;
+
       const cosm = getActiveCosmetics();
       const eloDiv = document.createElement('div');
+      eloDiv.className = 'ba-elo-chat-bar';
       eloDiv.innerHTML = `
         <!-- ELO + Coins bar -->
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
@@ -4927,13 +4968,8 @@
         </div>
         <div class="ba-chat-log" id="ba-chat-log-${battle.id || 'x'}"></div>`;
 
-      // Insert before the quiz question
-      const firstChild = body.firstChild;
-      if (firstChild) {
-        body.insertBefore(eloDiv, firstChild);
-      } else {
-        body.appendChild(eloDiv);
-      }
+      // Insert before the quiz question (append at bottom so it's below the quiz)
+      body.appendChild(eloDiv);
 
       // Load existing chat messages
       _renderChatLog(battle.id);
