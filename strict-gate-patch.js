@@ -111,7 +111,7 @@
     openPremium();
   };
 
-  /* ── Mock Test limit (3 per day FREE) - Only track on actual start ────────────────────── */
+/* ── Mock Test limit (3 per day FREE) - Only track on actual start ────────────────────── */
   window.getMockTestUsageToday = function() {
     const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
     if (!uid) return 0;
@@ -137,17 +137,19 @@
     const today = new Date().toISOString().split('T')[0];
     const key = 'sscai_mock_' + today + '_' + uid;
     const count = parseInt(localStorage.getItem(key) || '0');
+    const remaining = Math.max(0, FREE_MOCK_TESTS - count);
     
     if (count >= FREE_MOCK_TESTS) {
       return { 
         allowed: false, 
         reason: '🔒 Daily mock test limit reached (3/day free). Upgrade to Premium for unlimited.', 
         limit: 3, 
-        used: count 
+        used: count,
+        remaining: 0
       };
     }
     
-    return { allowed: true, used: count, limit: 3, remaining: FREE_MOCK_TESTS - count };
+    return { allowed: true, used: count, limit: 3, remaining: remaining };
   };
 
   /* ── Track mock test usage - Called ONLY when test actually starts ──────────────────────────– */
@@ -161,6 +163,9 @@
       const key = 'sscai_mock_' + today + '_' + uid;
       const count = parseInt(localStorage.getItem(key) || '0');
       localStorage.setItem(key, (count + 1).toString());
+      const newCount = count + 1;
+      const remaining = Math.max(0, FREE_MOCK_TESTS - newCount);
+      try { if (typeof showToast === 'function') showToast(`📝 Mock Test Started · Used 1/3 · ${remaining} remaining today`); } catch(e){}
     }
   };
 
@@ -205,17 +210,19 @@
     const today = new Date().toISOString().split('T')[0];
     const key = 'sscai_battles_' + today + '_' + uid;
     const count = parseInt(localStorage.getItem(key) || '0');
+    const remaining = Math.max(0, FREE_BATTLES - count);
     
     if (count >= FREE_BATTLES) {
       return { 
         allowed: false, 
         reason: '🔒 Daily battle limit reached (3/day free). Upgrade to Premium for unlimited',
         limit: 3,
-        used: count
+        used: count,
+        remaining: 0
       };
     }
     
-    return { allowed: true, used: count, limit: 3, remaining: FREE_BATTLES - count };
+    return { allowed: true, used: count, limit: 3, remaining: remaining };
   };
 
   /* ── Track battle usage - Called ONLY when battle actually starts ─────────────────── */
@@ -229,6 +236,9 @@
       const key = 'sscai_battles_' + today + '_' + uid;
       const count = parseInt(localStorage.getItem(key) || '0');
       localStorage.setItem(key, (count + 1).toString());
+      const newCount = count + 1;
+      const remaining = Math.max(0, FREE_BATTLES - newCount);
+      try { if (typeof showToast === 'function') showToast(`⚔️ Battle Joined · Used 1/3 · ${remaining} remaining today`); } catch(e){}
     }
   };
 
