@@ -3177,9 +3177,13 @@
                   const prefix = userData.email.split('@')[0];
                   entry.name = prefix.charAt(0).toUpperCase() + prefix.slice(1);
                 }
-                // Also fetch photoURL (avatar) from users collection if not in entry
+                // Fetch photoURL (avatar) from users collection if not in entry
                 if (!entry.photoURL && userData.photoURL) {
                   entry.photoURL = userData.photoURL;
+                }
+                // Fetch equipped shop avatar from users collection if not in entry
+                if (!entry.equippedAvatar && userData.equippedAvatar) {
+                  entry.equippedAvatar = userData.equippedAvatar;
                 }
               }
             } catch(err) {}
@@ -3295,9 +3299,9 @@
         const _lbAvatarHtml = (e, levelData) => {
           const initial = (e.name||'?').charAt(0).toUpperCase();
           // 1) Shop avatar emoji (stored in entry or read from local for "me")
-          let shopEmoji = e.avatar || null;
+          let shopEmoji = e.avatar || e.equippedAvatar || null;
           if (!shopEmoji && e.uid === myUid) {
-            // Read from either cosmetics system
+            // Read from either cosmetics system for current user
             try {
               const uid2 = myUid;
               // battle-arena style key
@@ -3316,8 +3320,17 @@
               }
             } catch(ex) {}
           }
-          if (shopEmoji) {
+          // If equipped avatar exists, convert to emoji for display
+          if (shopEmoji && !shopEmoji.match(/^[a-z]/i)) {
+            // Already an emoji
             return `<div class="lb-avatar" style="background:linear-gradient(135deg,${levelData.color}44,${levelData.color}22);font-size:20px;">${shopEmoji}</div>`;
+          } else if (shopEmoji) {
+            // It's an avatar ID like 'av_fire', convert to emoji
+            const emojiMap = { av_fire:'🔥', av_crown:'👑', av_brain:'🧠', av_star:'🌟', av_lightning:'⚡', av_shield:'🛡️', av_gem:'💎', av_rocket:'🚀', av_ninja:'🥷', av_robot:'🤖', av_dragon:'🐉', av_diamond:'💎', av_wizard:'🧙', av_astronaut:'🧑‍🚀', av_galaxy:'🌌', av_phantom:'👻', av_tiger:'🐯', av_frankenstein:'👹' };
+            const emoji = emojiMap[shopEmoji] || null;
+            if (emoji) {
+              return `<div class="lb-avatar" style="background:linear-gradient(135deg,${levelData.color}44,${levelData.color}22);font-size:20px;">${emoji}</div>`;
+            }
           }
           // 2) Google profile photo (stored in entry or from state for "me")
           let photoURL = e.photoURL || null;
@@ -3425,9 +3438,13 @@
                   const prefix = userData.email.split('@')[0];
                   entry.name = prefix.charAt(0).toUpperCase() + prefix.slice(1);
                 }
-                // Also fetch photoURL (avatar) from users collection if not in entry
+                // Fetch photoURL (avatar) from users collection if not in entry
                 if (!entry.photoURL && userData.photoURL) {
                   entry.photoURL = userData.photoURL;
+                }
+                // Fetch equipped shop avatar from users collection if not in entry
+                if (!entry.equippedAvatar && userData.equippedAvatar) {
+                  entry.equippedAvatar = userData.equippedAvatar;
                 }
               }
             } catch(err) {}
@@ -4407,6 +4424,20 @@
       if (pfOwned.length) appCos['owned_frame']  = pfOwned;
       localStorage.setItem('sscai_cosmetics', JSON.stringify(appCos));
     } catch(ex) {}
+    
+    // ★ SYNC equipped avatar to Firestore users collection ★
+    try {
+      const db = window._firebaseDb;
+      const { doc, updateDoc } = window._firebaseFns;
+      const u = window._firebaseAuth && window._firebaseAuth.currentUser;
+      if (db && u && u.uid && d.activeAvatar) {
+        updateDoc(doc(db, 'users', u.uid), { 
+          equippedAvatar: d.activeAvatar,
+          equippedAvatarUpdatedAt: Date.now()
+        }).catch(err => {}); // Silent fail if offline
+      }
+    } catch(ex) {}
+    
     // Trigger applyEquippedCosmetics in app.js so all profile pics update immediately
     if (typeof window.applyEquippedCosmetics === 'function') {
       try { window.applyEquippedCosmetics(); } catch(ex) {}
