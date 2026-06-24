@@ -1205,6 +1205,30 @@
           />
           ${searchQuery ? `<button onclick="BA._clearSearch()" style="padding:0 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(108,99,255,0.25);border-radius:10px;color:rgba(200,195,255,0.6);cursor:pointer;flex-shrink:0;">✕</button>` : ''}
         </div>`;
+      
+      // ── Show battle limit for free users ──
+      (async () => {
+        if (typeof window.checkBattleAccess === 'function') {
+          const access = await window.checkBattleAccess('arena');
+          if (!access.unlimited && access.limit && access.used !== undefined) {
+            const remaining = Math.max(0, access.limit - access.used);
+            const limitHtml = `
+              <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:rgba(200,195,255,0.8);">
+                <div style="font-weight:700;color:#fff;margin-bottom:4px;">⚔️ Free Daily Battles: ${access.used}/3 Used</div>
+                <div style="font-size:12px;color:rgba(200,195,255,0.6);">${remaining} free battles remaining today · Upgrade to Premium for unlimited</div>
+              </div>`;
+            const existingLimit = body.querySelector('[data-battle-limit]');
+            if (existingLimit) existingLimit.remove();
+            const searchDiv = body.querySelector('div[style*="display:flex;gap:8px"]');
+            if (searchDiv && searchDiv.nextSibling) {
+              const div = document.createElement('div');
+              div.setAttribute('data-battle-limit', '1');
+              div.innerHTML = limitHtml;
+              searchDiv.parentNode.insertBefore(div, searchDiv.nextSibling);
+            }
+          }
+        }
+      })();
       if (isCreator) {
         const baseRemaining = Math.max(0, maxAllowed - usage);
         const extraCredits = getBattleExtraCredits();
@@ -1953,6 +1977,16 @@
       const myName = getMyName();
 
       try {
+        // Check battle limit for free users
+        if (typeof window.checkBattleAccess === 'function') {
+          const access = await window.checkBattleAccess('arena');
+          if (!access.allowed) {
+            toast(access.reason);
+            if (typeof openPremiumModal === 'function') openPremiumModal();
+            return;
+          }
+        }
+
         const snap = await getDoc(doc(db, 'publicBattles', battleId));
         if (!snap.exists()) { toast('❌ Battle not found.'); return; }
         const battle = snap.data();
@@ -1977,6 +2011,11 @@
         const updatedBattle = { ...battle, players: updatedPlayers, playerNames: { ...(battle.playerNames||{}), [myUid]: myName } };
 
         this._openBattle(battleId, updatedBattle);
+
+        // Track usage for free users
+        if (typeof window.trackBattleUsage === 'function') {
+          window.trackBattleUsage('arena');
+        }
 
         // ── Auto-start: slot is now full — the user who filled the last slot
         //    triggers AI generation. Race condition is safe: _generateAndStart
@@ -3126,7 +3165,7 @@
           🏆 <strong>Weekly Battle XP Race</strong><br>
           The user with the most XP this week wins <strong>FREE Premium (1 month — ₹199 value)</strong>!
           Includes unlimited queries, all study modes, Mock Test &amp; PYQ Bank.<br>
-          <span style="font-size:10px;opacity:0.7;">Week resets every Monday. Winner auto-gets premium.</span>
+          <span style="font-size:10px;opacity:0.7;">Week resets every Monday. Winner auto-gets premium. Rankings update every 5 minutes.</span>
         </div>
 
         <div class="lb-tab-row">
