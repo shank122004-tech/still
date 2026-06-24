@@ -28,7 +28,6 @@
     ssc:              { id: 'ssc',              name: 'SSC Pro',                 price: 199,  emoji: '🎯' },
     semiannual:       { id: 'semiannual',        name: 'SSC 6-Month Plan',        price: 999,  emoji: '🔥' },
     yearly:           { id: 'yearly',           name: 'All-in-One Yearly',       price: 1699,  emoji: '🌟' },
-    class_basic:      { id: 'class_basic',      name: 'Class 1-12 Learning',     price: 129,  emoji: '📚' },
     // Battle Creator tiers
     battle:           { id: 'battle',           name: 'Battle Creator Basic',    price: 99,   emoji: '⚔️', battleMonthly: 5 },
     battle_pro:       { id: 'battle_pro',       name: 'Battle Creator Pro',      price: 299,  emoji: '⚔️', battleMonthly: 19 },
@@ -37,8 +36,8 @@
     battle_extra_25:  { id: 'battle_extra_25',  name: '+25 Battle Creations',    price: 99,   emoji: '⚔️', isAddon: true, battleCredits: 25 },
     // Study Group & Coaching plans (admin pays, members join free)
     group_leader:     { id: 'group_leader',     name: 'Group Leader',            price: 99,   emoji: '👥' },
-    coaching_basic:   { id: 'coaching_basic',   name: 'Coaching Starter',        price: 499,  emoji: '🎓' },
-    coaching_pro:     { id: 'coaching_pro',     name: 'Coaching Pro',            price: 999,  emoji: '🎓' },
+    coaching_basic:   { id: 'coaching_basic',   name: 'Coaching Plan Basic',     price: 499,  emoji: '🎓' },
+    coaching_pro:     { id: 'coaching_pro',     name: 'Coaching Plan Pro',       price: 999,  emoji: '🎓' },
   };
 
   const ADDONS = {
@@ -642,8 +641,8 @@
     const grpPlan = getGroupPlan();
 
     // ── Plan labels map ──
-    const planLabels = { ssc:'SSC Pro', yearly:'All-in-One Yearly', semiannual:'SSC 6-Month', class_basic:'Class 1-12 Learning',
-      battle:'Battle Basic', battle_pro:'Battle Pro', battle_academy:'Battle Academy',
+    const planLabels = { ssc:'SSC Pro', yearly:'All-in-One Pro Yearly',
+      semiannual:'SSC 6-Month', battle:'Battle Basic', battle_pro:'Battle Pro', battle_academy:'Battle Academy',
       group_leader:'Group Leader', coaching_basic:'Coaching Starter', coaching_pro:'Coaching Pro', premium:'Premium' };
     const activePlanName = planLabels[curPlan] || planLabels[grpPlan] || 'Premium';
 
@@ -678,7 +677,7 @@
       <!-- Card 1: SSC Pro -->
       <div class="upg-card ${(isPrem && (curPlan==='ssc'||curPlan==='premium')) ? 'upg-card-active' : ''}">
         <div class="upg-card-name">SSC Pro</div>
-        <div class="upg-card-tagline">Unlimited AI chats + Unlimited Battle access</div>
+        <div class="upg-card-tagline">Unlimited AI chats + Mock Tests + Battle access</div>
         <div class="upg-price-row">
           <span class="upg-price">₹199</span>
           <span class="upg-price-per">INR / month (incl. GST)</span>
@@ -687,11 +686,11 @@
           ${(isPrem && curPlan==='ssc') ? 'Your current plan' : 'Upgrade to SSC Pro'}
         </button>
         <ul class="upg-features">
-          <li>✦ Unlimited AI chats </li>
-          <li>✦ Unlimited Battle Arena access</li>
+          <li>✦ Unlimited AI chats (0 free)</li>
+          <li>✦ Unlimited Mock Tests (3 free/day)</li>
+          <li>✦ Unlimited Battle Arena access (3 free/day)</li>
           <li>✦ All 5 SSC exam modes (CGL · CHSL · GD · MTS · CPO)</li>
-          <li>✦ Mock Tests + detailed analysis</li>
-          
+          <li>✦ PYQ Bank — 10,000+ questions</li>
           <li>✦ Live leaderboards with 5-min refresh</li>
         </ul>
       </div>
@@ -700,7 +699,7 @@
       <div class="upg-card upg-card-popular ${(isPrem && curPlan==='semiannual') ? 'upg-card-active' : ''}">
         <div class="upg-popular-badge">🔥 BEST VALUE</div>
         <div class="upg-card-name">SSC 6-Month</div>
-        <div class="upg-card-tagline">Unlimited chats + Battle Arena — Save ₹195</div>
+        <div class="upg-card-tagline">Unlimited everything — Save ₹195</div>
         <div class="upg-price-row">
           <div>
             <div class="upg-price-old">₹1,194</div>
@@ -715,11 +714,11 @@
           ${(isPrem && curPlan==='semiannual') ? 'Your current plan' : 'Get 6-Month Plan'}
         </button>
         <ul class="upg-features">
-          <li>✦ Unlimited AI chats </li>
+          <li>✦ Unlimited AI chats</li>
+          <li>✦ Unlimited Mock Tests</li>
           <li>✦ Unlimited Battle Arena access</li>
           <li>✦ All 5 SSC exam modes</li>
-          <li>✦ Unlimited Mock Tests</li>
-          
+          <li>✦ PYQ Bank access (10,000+ Qs)</li>
           <li>✦ Priority AI responses</li>
           <li>✦ Valid for 6 full months</li>
         </ul>
@@ -728,7 +727,7 @@
       <!-- Card 3: Yearly All-in-One -->
       <div class="upg-card ${(isPrem && curPlan==='yearly') ? 'upg-card-active' : ''}">
         <div class="upg-card-name">All-in-One Yearly</div>
-        <div class="upg-card-tagline">Maximum productivity + Study Groups — Save ₹689</div>
+        <div class="upg-card-tagline">Maximum productivity — Save ₹689</div>
         <div class="upg-price-row">
           <div>
             <div class="upg-price-old">₹2,388</div>
@@ -742,11 +741,11 @@
           ${(isPrem && curPlan==='yearly') ? 'Your current plan' : 'Get Yearly Plan'}
         </button>
         <ul class="upg-features">
-          <li>✦ Unlimited AI chats </li>
+          <li>✦ Unlimited AI chats</li>
+          <li>✦ Unlimited Mock Tests</li>
           <li>✦ Unlimited Battle Arena access</li>
           <li>✦ All SSC exam modes (CGL · CHSL · GD · MTS · CPO)</li>
           <li>✦ Full platform access — 1 year</li>
-          <li>✦ Study Groups (create & manage)</li>
           <li>✦ Fastest AI model priority</li>
           <li>✦ Save ₹689 vs monthly</li>
         </ul>
@@ -755,34 +754,8 @@
     </div>
 
     <!-- BATTLE & CLASS PLANS -->
-    <!-- Row 1: Class Plans -->
+    <!-- Row 1: Battle Creator Plans -->
     <div id="upgBattlePlans" style="display:none;">
-
-      <!-- Class Section -->
-      <div class="upg-section-label">📚 Class 1-12 Learning Plan — AI chats + Battles</div>
-      
-      <div class="upg-plans-grid" style="margin-bottom:20px;">
-        <!-- Class 1-12 -->
-        <div class="upg-card ${(isPrem && curPlan==='class_basic') ? 'upg-card-active' : ''}">
-          <div class="upg-card-name">Class 1-12 Learning</div>
-          <div class="upg-card-tagline">For all class levels with subject help</div>
-          <div class="upg-price-row">
-            <span class="upg-price" style="color:#2dd4bf;">₹129</span>
-            <span class="upg-price-per">INR / month (incl. GST)</span>
-          </div>
-          <button onclick="handlePayment('class_basic')" class="upg-btn ${(isPrem && curPlan==='class_basic') ? 'upg-btn-active' : 'upg-btn-primary'}">
-            ${(isPrem && curPlan==='class_basic') ? 'Your current plan' : 'Get Class Learning Plan'}
-          </button>
-          <ul class="upg-features">
-            <li>✦ Unlimited AI chats for class subjects</li>
-            <li>✦ Unlimited Battle Arena access</li>
-            <li>✦ All subject help (Math · Science · English)</li>
-            <li>✦ Practice questions + solutions</li>
-            <li>✦ Live leaderboards (5-min refresh)</li>
-            <li>✦ Competitive battles with classmates</li>
-          </ul>
-        </div>
-      </div>
 
       <!-- Battle Creator section label -->
       <div class="upg-section-label">⚔️ Battle Creator Plans — You host, students join FREE</div>
