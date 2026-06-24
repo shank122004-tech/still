@@ -1381,6 +1381,16 @@
 
     /* ── Demo battle: real-feeling lobby → countdown → 10 AI questions → coins ── */
     async _joinDemoBattle(demoId) {
+      // Check battle limit for free users
+      if (typeof window.checkBattleAccess === 'function') {
+        const access = await window.checkBattleAccess('demo');
+        if (!access.allowed) {
+          toast(access.reason);
+          if (typeof openPremiumModal === 'function') openPremiumModal();
+          return;
+        }
+      }
+
       const demoDef = DEMO_BATTLES.find(d => d.id === demoId);
       if (!demoDef) return;
       const body = document.getElementById('ba-body');
@@ -1390,6 +1400,11 @@
 
       const myName = getMyName();
       const myUid  = uid();
+
+      // Track usage for free users (for both demo and real battles)
+      if (typeof window.trackBattleUsage === 'function') {
+        window.trackBattleUsage('demo');
+      }
 
       // Build initial player list (bots already in + me)
       const botNames   = Object.values(demoDef.playerNames);
