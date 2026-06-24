@@ -966,6 +966,10 @@ async function _generateQuizQuestions(exam, count, type) {
             if (typeof openPremiumModal === 'function') openPremiumModal();
             return;
           }
+          // Show remaining free tests before opening
+          if (access.remaining !== undefined) {
+            toast(`📝 You have ${access.remaining} free mock tests remaining today (3/day)`);
+          }
           // Track and open
           if (typeof window.trackMockTestUsage === 'function') window.trackMockTestUsage();
           CF.openModal('cf-mock-modal');
@@ -3446,8 +3450,14 @@ async function _generateQuizQuestions(exam, count, type) {
     
     // Use strict-gate-patch's proper verification
     const access = await window.checkBattleAccess(groupId);
-    if (!access) {
+    if (!access || !access.allowed) {
+      if (access && access.reason) toast(access.reason);
       return false;
+    }
+    
+    // Show remaining free battles before joining
+    if (access.remaining !== undefined) {
+      toast(`⚔️ You have ${access.remaining} free battles remaining today (3/day)`);
     }
     
     // Track battle usage for free users
