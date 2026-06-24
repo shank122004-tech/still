@@ -111,7 +111,7 @@
     openPremium();
   };
 
-/* ── Mock Test limit (3 per day FREE) - Only track on actual start ────────────────────── */
+  /* ── Mock Test limit (3 per day FREE) - Only track on actual start ────────────────────── */
   window.getMockTestUsageToday = function() {
     const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
     if (!uid) return 0;
@@ -124,7 +124,7 @@
     const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
     
     if (!uid) {
-      return { allowed: false, reason: 'Please login first' };
+      return { allowed: false, reason: '🔒 Please login first to access Mock Tests' };
     }
     
     const isPrem = await window.getPremiumStatus(uid);
@@ -201,7 +201,7 @@
   /* ── Battle access gate (3 per day FREE) - Both demo and real ─────────────────── */
   window.checkBattleAccess = async function(battleType) {
     const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
-    if (!uid) return { allowed: false, reason: 'Please login first' };
+    if (!uid) return { allowed: false, reason: '🔒 Please login first to access Arena Battles' };
     
     const isPrem = await window.getPremiumStatus(uid);
     if (isPrem) return { allowed: true, unlimited: true };
@@ -270,6 +270,13 @@
         e.stopImmediatePropagation();
         
         const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
+        
+        if (!uid) {
+          try { if (typeof showToast === 'function') showToast('🔒 Please login first to create groups'); } catch(e){}
+          openPremium();
+          return false;
+        }
+        
         const isPrem = uid ? (localStorage.getItem('sscai_u:' + uid + ':premium') === 'true') : false;
         
         if (!isPrem) {
@@ -292,13 +299,20 @@
   setTimeout(patchGroupCreation, 800);
   setTimeout(patchGroupCreation, 2500);
 
-  /* ── Intercept group admin features - Block for free users ─ */
+  /* ── Intercept group admin features - Block for free users and guests ─ */
   document.addEventListener('click', function(e) {
     try {
       var adminFeature = e.target.closest && (e.target.closest('[data-admin-feature]') || e.target.closest('.admin-only'));
       if (!adminFeature) return;
       
       const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
+      if (!uid) {
+        e.stopImmediatePropagation();
+        try { if (typeof showToast === 'function') showToast('🔒 Please login first to create or manage groups'); } catch(ex){}
+        openPremium();
+        return false;
+      }
+      
       const isPrem = uid ? (localStorage.getItem('sscai_u:' + uid + ':premium') === 'true') : false;
       
       if (!isPrem) {
@@ -384,14 +398,19 @@
       var el = document.getElementById('messageLimitInfo');
       if (el) el.remove();
       
-      // Hide all message limit displays in sidebar
-      document.querySelectorAll('[data-limit="messages"], .message-limit-info, .free-chats-left, .chat-limit-badge').forEach(function(e) {
-        e.style.display = 'none';
+      // Hide all message limit displays in sidebar - multiple selectors to catch all variations
+      document.querySelectorAll('[data-limit="messages"], .message-limit-info, .free-chats-left, .chat-limit-badge, .limit-info, [data-chats-left], .chats-remaining, .sidebar-limit-counter, [class*="limit"], [class*="chat-count"], [class*="message-count"]').forEach(function(e) {
+        if (e.textContent && (e.textContent.includes('left') || e.textContent.includes('chat') || e.textContent.includes('message'))) {
+          e.style.display = 'none';
+        }
       });
       
-      // Hide chat limit counter
-      var limitCounter = document.querySelector('.sidebar-limit-counter');
-      if (limitCounter) limitCounter.style.display = 'none';
+      // Aggressively hide anything mentioning "left" or chat limits
+      document.querySelectorAll('*').forEach(function(el) {
+        if (el.textContent && /(\d+\s+(chats?|messages?)\s+left|free.*(chat|message))/i.test(el.textContent) && el.classList && el.classList.length > 0) {
+          el.style.display = 'none';
+        }
+      });
       
     } catch(e) {}
   };
@@ -400,7 +419,7 @@
   window.updateLimitUI();
   setInterval(function() {
     window.updateLimitUI();
-  }, 5000);
+  }, 3000);
 
   /* ── Voice/Microphone Premium Gate ──────────────────────────── */
   function patchVoiceGate() {
@@ -428,6 +447,45 @@
   }
   setTimeout(patchVoiceGate, 800);
   setTimeout(patchVoiceGate, 2500);
+
+  /* ── Guest gate for Premium modal - prevent guests from seeing premium options ── */
+  function patchPremiumModal() {
+    var _origOpenPremium = window.openPremiumModal;
+    window.openPremiumModal = function() {
+      const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
+      
+      if (!uid) {
+        try { if (typeof showToast === 'function') showToast('🔒 Please login first to view premium plans'); } catch(e){}
+        return false;
+      }
+      
+      if (typeof _origOpenPremium === 'function') return _origOpenPremium();
+      var pm = document.getElementById('premiumModal');
+      if (pm) pm.classList.add('active');
+    };
+    
+    var upgradeBtn = document.getElementById('profileUpgradeBtn2');
+    if (upgradeBtn) {
+      upgradeBtn.addEventListener('click', function(e) {
+        const uid = (typeof window._firebaseAuth !== 'undefined' && window._firebaseAuth.currentUser) ? window._firebaseAuth.currentUser.uid : null;
+        
+        if (!uid) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          try { if (typeof showToast === 'function') showToast('🔒 Please login first to upgrade'); } catch(ex){}
+          return false;
+        }
+      }, true);
+    }
+  }
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', patchPremiumModal);
+  } else {
+    patchPremiumModal();
+  }
+  setTimeout(patchPremiumModal, 800);
+  setTimeout(patchPremiumModal, 2500);
 
   /* ── On login: sync premium status from Firestore ──────────– */
   if (typeof window._firebaseAuth !== 'undefined') {
