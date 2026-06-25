@@ -1555,8 +1555,12 @@
         botAutoTimer: null,
         fakeJoinTimer: null,
         nextQTimer: null,
+        timerInterval: null,
+        battleStartTime: null,
+        battleEndTime: null,
         examKey: demoDef._examKey || 'cgl',
         resultsShown: false,
+        userAttemptedCount: 0,
       };
       let joinedCount = allPlayers.length;
 
@@ -1667,10 +1671,52 @@
             setTimeout(tick, 1000);
           } else {
             if (numEl) { numEl.textContent = 'GO!'; numEl.style.animation = 'none'; void numEl.offsetWidth; numEl.style.animation = 'ba-countpop 0.6s ease'; }
-            setTimeout(() => { overlay.remove(); if (this._activeBattleId === demoId) _demoShowQuestion(); }, 800);
+            setTimeout(() => { 
+              overlay.remove(); 
+              if (this._activeBattleId === demoId) {
+                // Initialize 5-minute battle timer
+                demoState.battleStartTime = Date.now();
+                demoState.battleEndTime = demoState.battleStartTime + (300 * 1000); // 5 minutes = 300 seconds
+                _startBattleTimer();
+                _demoShowQuestion();
+              }
+            }, 800);
           }
         };
         setTimeout(tick, 1000);
+      };
+
+      // ── Battle timer — runs every question ──
+      const _startBattleTimer = () => {
+        if (demoState.timerInterval) clearInterval(demoState.timerInterval);
+        const updateTimer = () => {
+          if (this._activeBattleId !== demoId || !demoState.battleEndTime) return;
+          const now = Date.now();
+          const remaining = Math.max(0, demoState.battleEndTime - now);
+          const seconds = Math.ceil(remaining / 1000);
+          const mins = Math.floor(seconds / 60);
+          const secs = seconds % 60;
+          
+          const timerEl = document.getElementById('demo-battle-timer');
+          if (timerEl) {
+            timerEl.textContent = `⏱️ ${mins}:${secs.toString().padStart(2, '0')}`;
+            if (seconds <= 60 && seconds > 0) {
+              timerEl.style.color = '#ef4444';
+              timerEl.style.fontWeight = '900';
+            } else if (seconds === 0) {
+              timerEl.style.color = '#dc2626';
+            }
+          }
+          
+          // Auto-end battle when timer expires
+          if (seconds === 0 && this._activeBattleId === demoId) {
+            if (demoState.timerInterval) clearInterval(demoState.timerInterval);
+            demoState.answered = true;
+            _demoResults();
+          }
+        };
+        demoState.timerInterval = setInterval(updateTimer, 500);
+        updateTimer();
       };
 
       // ── Render question ──
@@ -1678,11 +1724,19 @@
         clearTimeout(demoState.botAutoTimer); clearTimeout(demoState.nextQTimer);
         const qi = demoState.qi;
         const q  = demoState.questions && demoState.questions[qi];
-        // Check if battle is over (reached question limit or no more questions)
+        
+        // Check battle end conditions
         if (!q || !q.opts || qi >= 10) { 
           _demoResults(); 
           return; 
         }
+        
+        // Check if timer has expired
+        if (demoState.battleEndTime && Date.now() >= demoState.battleEndTime) {
+          _demoResults();
+          return;
+        }
+        
         // Only proceed if still in active demo battle
         if (this._activeBattleId !== demoId) return;
         demoState.answered = false;
@@ -1694,11 +1748,22 @@
           return `<div class="ba-xp-board"><div class="ba-xp-board-title">⚡ Live XP Board</div>${entries.map(([u,x],i) => `<div class="ba-xp-row ${u===myUid?'me':''}""><span class="ba-xp-rank">${['🥇','🥈','🥉'][i]||'#'+(i+1)}</span><span class="ba-xp-name">${demoState.playerNamesMap[u]||'Player'}</span><div class="ba-xp-bar-wrap"><div class="ba-xp-mini-bar"><div class="ba-xp-mini-fill" style="width:${Math.round((x/_maxXp1)*100)}%"></div></div></div><span class="ba-xp-val">${x}</span></div>`).join('')}</div>`;
         };
 
+        // Calculate remaining time
+        let timeDisplay = '5:00';
+        if (demoState.battleEndTime) {
+          const remaining = Math.max(0, demoState.battleEndTime - Date.now());
+          const secs = Math.ceil(remaining / 1000);
+          const mins = Math.floor(secs / 60);
+          const sec = secs % 60;
+          timeDisplay = `${mins}:${sec.toString().padStart(2, '0')}`;
+        }
+
         body.innerHTML = `
           <div class="ba-active-wrap">
             <div class="ba-quiz-header">
               <span class="ba-quiz-num-pill">Q ${qi+1} <span style="opacity:0.5;">/ 10</span></span>
               <span class="ba-quiz-xp-pill">⚡ ${demoState.xp[myUid]||0} XP</span>
+              <span class="ba-quiz-xp-pill" id="demo-battle-timer" style="background:linear-gradient(135deg,#ef4444,#dc2626);margin-left:8px;">⏱️ ${timeDisplay}</span>
             </div>
             <div class="ba-quiz-bar"><div class="ba-quiz-bar-fill" style="width:${(qi/10)*100}%"></div></div>
             <div class="ba-quiz-q-card">
@@ -1716,16 +1781,17 @@
             <div id="demo-xp-board">${_xpBoardHtml()}</div>
           </div>`;
 
-        // Bot auto-answer if user doesn't answer in 7-8s
+        // Bot auto-answer if user doesn't answer in 5-6s
         demoState.botAutoTimer = setTimeout(() => {
           if (!demoState.answered && this._activeBattleId === demoId) BA._demoAnswer(demoId, -1);
-        }, 7000 + Math.random() * 1000);
+        }, 5000 + Math.random() * 1000);
       };
 
       // ── Handle answer (exposed globally for this demo) ──
       BA._demoAnswer = (id, chosenIdx) => {
         if (id !== demoId || this._activeBattleId !== demoId || demoState.answered) return;
         demoState.answered = true;
+        demoState.userAttemptedCount++;
         clearTimeout(demoState.botAutoTimer);
         const qi   = demoState.qi;
         const q    = demoState.questions[qi];
@@ -1744,7 +1810,7 @@
 
         if (!isBot && correct) demoState.xp[myUid] = (demoState.xp[myUid] || 0) + 10;
 
-        // Simulate bots answering
+        // Simulate bots answering — each independent
         const botKeys = Object.keys(demoState.playerNamesMap).filter(k => k !== myUid);
         botKeys.slice(0, 2 + Math.floor(Math.random() * 2)).forEach(bk => {
           if (Math.random() > 0.4) demoState.xp[bk] = (demoState.xp[bk] || 0) + 10;
@@ -1782,23 +1848,55 @@
         if (this._activeBattleId !== demoId) return;
         if (demoState.resultsShown) return;
         demoState.resultsShown = true;
-        clearTimeout(demoState.botAutoTimer); clearTimeout(demoState.nextQTimer); clearTimeout(demoState.fakeJoinTimer);
+        
+        // Clear all timers
+        clearTimeout(demoState.botAutoTimer); 
+        clearTimeout(demoState.nextQTimer); 
+        clearTimeout(demoState.fakeJoinTimer);
+        if (demoState.timerInterval) clearInterval(demoState.timerInterval);
+        
         const sorted = Object.entries(demoState.xp).sort((a,b)=>b[1]-a[1]);
         const myRank = sorted.findIndex(([u]) => u === myUid);
         const myXP   = demoState.xp[myUid] || 0;
-        // New coin system: 1st=25, 2nd=15, 3rd=8, rest=2
+        
+        // Coin system: 1st=25, 2nd=15, 3rd=8, rest=2
         let coinsWon = myRank === 0 ? 25 : myRank === 1 ? 15 : myRank === 2 ? 8 : myRank >= 3 ? 2 : 0;
+        
+        // Award coins if not already awarded
         if (coinsWon > 0) {
           const awardKey = 'ba_coins_demo_' + demoId + '_' + myUid;
           if (!localStorage.getItem(awardKey)) {
             localStorage.setItem(awardKey, '1');
-            _syncCoinsToFirebase(myUid, coinsWon, 'Demo Battle 🏆');
+            // Sync coins to Firestore immediately
+            if (typeof _syncCoinsToFirebase === 'function') {
+              _syncCoinsToFirebase(myUid, coinsWon, 'Demo Battle 🏆').catch(() => {
+                // Fallback if Firebase sync fails
+                const u = window._firebaseAuth?.currentUser;
+                if (u) {
+                  const k = 'sscai_u:' + u.uid + ':coins';
+                  const cur = JSON.parse(localStorage.getItem(k) || '{"coins":0}');
+                  cur.coins = (cur.coins || 0) + coinsWon;
+                  localStorage.setItem(k, JSON.stringify(cur));
+                }
+              });
+            }
             if (typeof toast === 'function') {
               toast(`🪙 +${coinsWon} coins earned! 🎉`, 2500);
             }
           }
         }
-        addBattleXP(myXP);
+        
+        // Add XP to battle leaderboard
+        if (typeof addBattleXP === 'function') {
+          addBattleXP(myXP);
+        }
+        
+        // Save to Firestore leaderboard
+        try {
+          if (typeof BA !== 'undefined' && BA._saveToLeaderboard) {
+            BA._saveToLeaderboard(myUid, myName, myXP).catch(() => {});
+          }
+        } catch(ex) {}
 
         // ── Save demo bot results to LOCAL leaderboard ONLY (not Firestore) ──
         // Do NOT mix demo players with real users on Firestore leaderboard
@@ -1813,34 +1911,30 @@
           // Cap demo entries at 5 per week (not 30)
           if (thisWeekEntries.length >= 5) {
             // Don't add more demo entries this week
-            return;
+          } else {
+            const existingNames = new Set(thisWeekEntries.map(e => e.name));
+            const demoNames = ['Arjun', 'Priya', 'Rohan', 'Neha', 'Karan', 'Sakshi', 'Aditya', 'Divya', 'Ravi', 'Anjali'];
+            const uniqueDemoNames = demoNames.filter(n => !existingNames.has(n));
+            
+            const newEntries = sorted
+              .filter(([u]) => u !== myUid)
+              .slice(0, Math.min(2, uniqueDemoNames.length))  // Only 2 demo bots per battle
+              .map(([u, xp], idx) => ({
+                uid: 'demo_' + u + '_' + Date.now(),
+                name: uniqueDemoNames[idx] || ('Bot' + idx),
+                // CAP demo XP at 100 max (not hundreds)
+                xp: Math.min(xp || 0, 100),
+                battles: Math.floor(Math.random() * 5) + 1,
+                wins: Math.floor(Math.random() * 2),
+                coins: 0,
+                weekKey: wk,
+                _demo: true
+              }));
+            
+            // Merge: keep this week + new entries, drop old weeks
+            const merged = [...thisWeekEntries, ...newEntries].slice(-5); // Max 5 per week
+            localStorage.setItem(demoLbKey, JSON.stringify(merged));
           }
-          
-          const existingNames = new Set(thisWeekEntries.map(e => e.name));
-          const demoNames = ['Arjun', 'Priya', 'Rohan', 'Neha', 'Karan', 'Sakshi', 'Aditya', 'Divya', 'Ravi', 'Anjali'];
-          const uniqueDemoNames = demoNames.filter(n => !existingNames.has(n));
-          
-          const newEntries = sorted
-            .filter(([u]) => u !== myUid)
-            .slice(0, Math.min(2, uniqueDemoNames.length))  // Only 2 demo bots per battle
-            .map(([u, xp], idx) => ({
-              uid: 'demo_' + u + '_' + Date.now(),
-              name: uniqueDemoNames[idx] || ('Bot' + idx),
-              // CAP demo XP at 100 max (not hundreds)
-              xp: Math.min(xp || 0, 100),
-              battles: Math.floor(Math.random() * 5) + 1,
-              wins: Math.floor(Math.random() * 2),
-              coins: 0,
-              weekKey: wk,
-              _demo: true
-            }));
-          
-          // Merge: keep this week + new entries, drop old weeks
-          const merged = [...thisWeekEntries, ...newEntries].slice(-5); // Max 5 per week
-          localStorage.setItem(demoLbKey, JSON.stringify(merged));
-          
-          // ⚠️ DO NOT SAVE TO FIRESTORE — demo players should stay LOCAL ONLY
-          // This prevents mixing demo/real users in other people's leaderboards
         } catch(ex) {}
 
         const winnerEntry = sorted[0];
@@ -1879,6 +1973,7 @@
         clearTimeout(demoState.fakeJoinTimer);
         clearTimeout(demoState.botAutoTimer);
         clearTimeout(demoState.nextQTimer);
+        if (demoState.timerInterval) clearInterval(demoState.timerInterval);
       };
     },
 
@@ -2593,6 +2688,7 @@
             updateDoc(doc(db, 'publicBattles', battleId), {
               status: 'active',
               startedAt: Date.now(),
+              battleTimerEndsAt: Date.now() + (300 * 1000), // 5 minute timer
               questions: data.questions || [],
               quiz: {
                 status: 'active',
@@ -2602,6 +2698,10 @@
                 questionStartedAt: Date.now()
               }
             }).catch(()=>{});
+          }
+          // Start 5-minute battle timer on all clients
+          if (BattleTimer && battleId) {
+            BattleTimer.start(battleId, 300);
           }
           setTimeout(() => {
             overlay.remove();
@@ -2675,6 +2775,7 @@
           <div class="ba-quiz-header">
             <span class="ba-quiz-num-pill">Q ${qi+1} <span style="opacity:0.5;">/ ${questions.length}</span></span>
             <span class="ba-quiz-xp-pill">⚡ ${quiz.xp && quiz.xp[myUid] ? quiz.xp[myUid] : 0} XP</span>
+            <span class="ba-quiz-xp-pill" data-battle-timer style="background:linear-gradient(135deg,#ef4444,#dc2626);margin-left:8px;">⏱️ 5:00</span>
           </div>
           <div style="display:flex;gap:4px;margin-bottom:12px;align-items:center;">
             <div class="ba-quiz-bar"><div class="ba-quiz-bar-fill" style="width:${progressPct}%"></div></div>
@@ -3068,6 +3169,34 @@
       this._activeBattleId = null;
       this._countdownShown = false;
       this._renderArena();
+    },
+
+    /* ── End battle when 5-minute timer expires ── */
+    _endBattleByTimer(battleId) {
+      if (!battleId) return;
+      const body = document.getElementById('ba-body');
+      if (!body) return;
+      
+      // For demo battles, show results
+      if (battleId.startsWith('demo_')) {
+        // Demo battle timer expired - results already shown by timer logic
+        return;
+      }
+      
+      // For real battles, show results page
+      if (this._activeBattleId === battleId && this._lastBattleData) {
+        // Mark battle as ended in Firestore
+        try {
+          const db = window._firebaseDb;
+          const { doc, updateDoc } = window._firebaseFns;
+          if (db) {
+            updateDoc(doc(db, 'publicBattles', battleId), { status: 'ended', endedAt: Date.now() }).catch(() => {});
+          }
+        } catch(e) {}
+        
+        // Render results
+        this._renderBattleWinner(this._lastBattleData);
+      }
     },
 
     /* ── Share result — WhatsApp + copy link ── */
