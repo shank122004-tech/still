@@ -3384,6 +3384,22 @@
 
         // Grab photoURL + equipped avatar to show in leaderboard
         const _lbPhotoURL = (() => { try { const u = window._firebaseAuth && window._firebaseAuth.currentUser; return (u && u.photoURL) ? u.photoURL : ''; } catch(e) { return ''; } })();
+        
+        // Complete emoji map for all avatars
+        const AVATAR_EMOJI_MAP = {
+          'av_default': '🧑‍🎓', 'av_fire': '🔥', 'av_lightning': '⚡', 'av_rocket': '🚀',
+          'av_crown': '👑', 'av_diamond': '💎', 'av_ninja': '🥷', 'av_wizard': '🧙‍♂️',
+          'av_robot': '🤖', 'av_astronaut': '👨‍🚀', 'av_galaxy': '🌌', 'av_phantom': '👻',
+          'av_tiger': '🐯', 'av_dragon': '🐉', 'av_legend': '⭐', 'av_panda': '🐼',
+          'av_owl': '🦉', 'av_alien': '👽', 'av_knight': '🛡️', 'av_phoenix': '🦅',
+          'av_unicorn': '🦄', 'av_octopus': '🐙', 'av_shark': '🦈', 'av_genius': '🧠',
+          'av_samurai': '🗾', 'av_king': '🤴', 'av_queen': '👸', 'av_demon': '👿',
+          'av_angel': '😇', 'av_vampire': '🧛', 'av_werewolf': '🐺', 'av_mummy': '🪦',
+          'av_zombie': '🧟', 'av_frankenstein': '👹', 'av_lion': '🦁', 'av_eagle': '🦅',
+          'av_wolf': '🐺', 'av_bear': '🐻', 'av_snake': '🐍', 'av_scorpion': '🦂',
+          'av_fox': '🦊', 'av_swan': '🦢', 'av_peacock': '🦚', 'av_parrot': '🦜'
+        };
+        
         const _lbAvatar = (() => {
           try {
             // READ FROM CORRECT shop_owned KEY where purchased avatars are stored
@@ -3391,23 +3407,8 @@
             const shopData = JSON.parse(localStorage.getItem(shopKey) || '{"owned":[],"equipped":{}}');
             const equippedAvatarId = shopData.equipped && shopData.equipped.avatars;
             
-            if (equippedAvatarId) {
-              // Map avatar IDs to emojis
-              const emojiMap = {
-                'av_fire': '🔥',
-                'av_crown': '👑',
-                'av_brain': '🧠',
-                'av_star': '⭐',
-                'av_lightning': '⚡',
-                'av_shield': '🛡️',
-                'av_gem': '💎',
-                'av_rocket': '🚀',
-                'av_ninja': '🥷',
-                'av_robot': '🤖',
-                'av_dragon': '🐉',
-                'av_diamond': '💎'
-              };
-              return emojiMap[equippedAvatarId] || '';
+            if (equippedAvatarId && AVATAR_EMOJI_MAP[equippedAvatarId]) {
+              return AVATAR_EMOJI_MAP[equippedAvatarId];
             }
           } catch(e) {}
           return '';
@@ -3690,6 +3691,20 @@
         html += `<div class="ba-empty">📭 No battles this week yet.<br>Be the first to compete! ⚔️</div>`;
       } else {
         // Helper: get avatar HTML for a leaderboard entry
+        const AVATAR_EMOJI_MAP = {
+          'av_default': '🧑‍🎓', 'av_fire': '🔥', 'av_lightning': '⚡', 'av_rocket': '🚀',
+          'av_crown': '👑', 'av_diamond': '💎', 'av_ninja': '🥷', 'av_wizard': '🧙‍♂️',
+          'av_robot': '🤖', 'av_astronaut': '👨‍🚀', 'av_galaxy': '🌌', 'av_phantom': '👻',
+          'av_tiger': '🐯', 'av_dragon': '🐉', 'av_legend': '⭐', 'av_panda': '🐼',
+          'av_owl': '🦉', 'av_alien': '👽', 'av_knight': '🛡️', 'av_phoenix': '🦅',
+          'av_unicorn': '🦄', 'av_octopus': '🐙', 'av_shark': '🦈', 'av_genius': '🧠',
+          'av_samurai': '🗾', 'av_king': '🤴', 'av_queen': '👸', 'av_demon': '👿',
+          'av_angel': '😇', 'av_vampire': '🧛', 'av_werewolf': '🐺', 'av_mummy': '🪦',
+          'av_zombie': '🧟', 'av_frankenstein': '👹', 'av_lion': '🦁', 'av_eagle': '🦅',
+          'av_wolf': '🐺', 'av_bear': '🐻', 'av_snake': '🐍', 'av_scorpion': '🦂',
+          'av_fox': '🦊', 'av_swan': '🦢', 'av_peacock': '🦚', 'av_parrot': '🦜'
+        };
+        
         const _lbAvatarHtml = (e, levelData) => {
           const initial = (e.name||'?').charAt(0).toUpperCase();
           // 1) Shop avatar emoji (stored in entry or read from local for "me")
@@ -3702,14 +3717,8 @@
               const shopData = JSON.parse(localStorage.getItem(shopKey) || '{"owned":[],"equipped":{}}');
               const equippedAvatarId = shopData.equipped && shopData.equipped.avatars;
               
-              if (equippedAvatarId) {
-                const emojiMap = { 
-                  'av_fire':'🔥', 'av_crown':'👑', 'av_brain':'🧠', 'av_star':'⭐', 
-                  'av_lightning':'⚡', 'av_shield':'🛡️', 'av_gem':'💎', 'av_rocket':'🚀', 
-                  'av_ninja':'🥷', 'av_robot':'🤖', 'av_dragon':'🐉', 'av_diamond':'💎', 
-                  'av_wizard':'🧙', 'av_astronaut':'🧑‍🚀', 'av_galaxy':'🌌', 'av_phantom':'👻', 'av_tiger':'🐯' 
-                };
-                shopEmoji = emojiMap[equippedAvatarId] || null;
+              if (equippedAvatarId && AVATAR_EMOJI_MAP[equippedAvatarId]) {
+                shopEmoji = AVATAR_EMOJI_MAP[equippedAvatarId];
               }
             } catch(ex) {}
           }
