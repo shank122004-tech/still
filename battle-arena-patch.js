@@ -2381,13 +2381,26 @@
             setTimeout(() => this._pollGameBattle(battleId), 200);
             return;
           }
-          // Detect question change — reset hash so new question always renders fresh
-          const currentQi = (data.quiz || {}).current || 0;
-          if (this._lastRenderedQi !== currentQi) {
-            this._lastRenderedQi = currentQi;
+          
+          // CHECK USER'S INDIVIDUAL PROGRESS instead of global current
+          const myUid = uid();
+          const userProgress = (data.quiz && data.quiz.userProgress && data.quiz.userProgress[myUid]) || 0;
+          if (this._lastRenderedQi !== userProgress) {
+            this._lastRenderedQi = userProgress;
             this._lastRenderHash = null;
             this._stopQuestionTimer(); // stop old timer before new render
           }
+          
+          // Check if this user finished all questions
+          if (userProgress >= data.questions.length) {
+            this._stopPolling();
+            this._stopQuestionTimer();
+            this._countdownShown = false;
+            this._lastRenderHash = null;
+            this._renderBattleWinner(data);
+            return;
+          }
+          
           this._renderActiveQuiz(data);
         } else if (data.status === 'finished') {
           this._stopPolling();
@@ -2735,7 +2748,10 @@
       if (!body) return;
 
       const quiz = battle.quiz || {};
-      const qi = quiz.current || 0;
+      const myUid = uid();
+      // USE USER'S INDIVIDUAL PROGRESS instead of global current
+      const userProgress = (quiz.userProgress && quiz.userProgress[myUid]) || 0;
+      const qi = userProgress;
       const questions = battle.questions || [];
       
       // Ensure questions exist before proceeding
@@ -2755,7 +2771,6 @@
 
       // FIX: Firestore stores object keys as strings — check both string and number key
       const answered = (quiz.answers && (quiz.answers[qi] || quiz.answers[String(qi)])) || null;
-      const myUid = uid();
       const iAnswered = answered && answered.uid === myUid;
 
       const battleId = battle.id || this._activeBattleId;
@@ -2909,26 +2924,32 @@
       try {
         const db = window._firebaseDb;
         const { doc, getDoc, updateDoc } = window._firebaseFns;
+        const myUid = uid();
         const snap = await getDoc(doc(db, 'publicBattles', battleId));
         if (!snap.exists()) return;
         const battle = snap.data();
         const quiz = battle.quiz || {};
-        // Only skip if still on the same question and not already answered
-        if (quiz.current !== qi) return;
+        
+        // Get user's current progress
+        const userProgress = (quiz.userProgress && quiz.userProgress[myUid]) || 0;
+        // Only skip if this user is still on this question
+        if (userProgress !== qi) return;
+        
         const nextIdx = qi + 1;
         const isLast = nextIdx >= (battle.questions || []).length;
+        const myName = getMyName();
+        
+        // Auto-answer with wrong answer for this user
         const updates = {
-          ['quiz.answers.' + String(qi)]: { uid: 'system', name: 'Time Up', chosen: -1, correct: false, ts: Date.now() },
-          ['quiz.current']: isLast ? qi : nextIdx,
-          ['quiz.status']: isLast ? 'finished' : 'active',
-          ['quiz.questionStartedAt']: isLast ? (quiz.questionStartedAt || Date.now()) : Date.now(),
+          ['quiz.answers.' + 'user_' + myUid + '_q' + String(qi)]: 
+            { uid: myUid, name: myName, chosen: -1, correct: false, ts: Date.now() },
+          ['quiz.xp.' + myUid]: (quiz.xp && quiz.xp[myUid]) ? quiz.xp[myUid] - 3 : -3,
+          ['quiz.userProgress.' + myUid]: isLast ? qi : nextIdx,
+          ['quiz.status']: 'active',
         };
-        if (isLast) {
-          updates.status = 'finished';
-          setTimeout(async () => {
-            try { const { doc: d2, deleteDoc } = window._firebaseFns; await deleteDoc(d2(window._firebaseDb, 'publicBattles', battleId)); } catch(_) {}
-          }, 30000);
-        }
+        
+        await updateDoc(doc(db, 'publicBattles', battleId), updates);
+      } catch(e) {}
         await updateDoc(doc(db, 'publicBattles', battleId), updates);
         if (isLast && this._activeBattleId) {
           setTimeout(() => this._pollGameBattle(this._activeBattleId), 300);
@@ -2990,11 +3011,12 @@
           const answer = q.opts[q.ans] || '';
           waiting.outerHTML = `
             <div class="ba-quiz-answered-banner ${correct ? 'correct' : 'wrong'}" style="animation: ba-pop-in 0.15s ease;">
-              ${correct ? '✅ Correct! <b>+10 XP</b>' : `❌ Wrong! Answer: <b>${answer}</b>`}
+              ${correct ? '✅ Correct! <b>+' + CORRECT_XP + ' XP</b>' : `❌ Wrong! <b>` + WRONG_XP + ` XP</b> Answer: <b>${answer}</b>`}
             </div>
             ${q.exp ? `<div class="ba-quiz-exp">💡 ${q.exp}</div>` : ''}`;
         }
-        if (correct) addBattleXP(CORRECT_XP);
+        // ADD XP FOR BOTH CORRECT AND WRONG ANSWERS
+        addBattleXP(xpDelta);
 
         // ── WRITE to Firestore (background — UI already updated) ──
         const updates = {
@@ -3003,15 +3025,14 @@
           ['quiz.xp.' + myUid]: newXP,
           ['quiz.userProgress.' + myUid]: nextIdx,
           ['quiz.answers.' + String(qi)]: { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
-          ['quiz.current']: isLast ? qi : nextIdx,
-          ['quiz.status']: isLast ? 'finished' : 'active',
-          ['quiz.questionStartedAt']: isLast ? (quiz.questionStartedAt || questionStartTs) : questionStartTs,
+          ['quiz.status']: 'active',
+          ['quiz.questionStartedAt']: questionStartTs,
         };
+        
+        // Check if this user finished all questions
         if (isLast) {
-          updates.status = 'finished';
-          setTimeout(async () => {
-            try { const { doc: d2, deleteDoc } = window._firebaseFns; await deleteDoc(d2(window._firebaseDb, 'publicBattles', battleId)); } catch(_) {}
-          }, 30000);
+          updates['quiz.userProgress.' + myUid] = qi; // Keep at last question
+          // Don't mark battle as finished yet - wait for others or timeout
         }
 
         // Clear render hash so next poll re-renders with new question
@@ -3032,12 +3053,10 @@
 
       this._answerSubmitting = false;
 
-      // AGGRESSIVE re-poll: 50ms, 150ms, 300ms for instant next question
+      // INSTANT next question display: small delay for Firestore write to complete
       if (this._activeBattleId) {
         const bid = this._activeBattleId;
-        setTimeout(() => this._pollGameBattle(bid), 50);
-        setTimeout(() => this._pollGameBattle(bid), 150);
-        setTimeout(() => this._pollGameBattle(bid), 300);
+        setTimeout(() => this._pollGameBattle(bid), 100);
       }
     },
 
