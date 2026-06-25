@@ -1824,7 +1824,7 @@
           banner.style.display = 'block';
           if (isBot) {
             banner.className = 'ba-quiz-answered-banner wrong';
-            banner.innerHTML = `⏱ Time's up! Someone answered first`;
+            banner.innerHTML = `⏱ Time's up! Question skipped`;
           } else {
             banner.className = 'ba-quiz-answered-banner ' + (correct ? 'correct' : 'wrong');
             const answer = (q.opts && q.opts[q.ans]) || 'Loading...';
@@ -1869,30 +1869,57 @@
         if (coinsWon > 0) {
           const awardKey = 'ba_coins_demo_' + demoId + '_' + myUid;
           if (!localStorage.getItem(awardKey)) {
-            // Sync coins to Firestore immediately
-            if (typeof _syncCoinsToFirebase === 'function') {
-              _syncCoinsToFirebase(myUid, coinsWon, 'Demo Battle 🏆').then(success => {
-                if (success) {
-                  localStorage.setItem(awardKey, '1');
-                  // Refresh profile coins display if open
-                  if (typeof window.refreshProfileCoinsDisplay === 'function') {
-                    setTimeout(() => { window.refreshProfileCoinsDisplay(); }, 300);
-                  }
+            // Sync coins to Firestore immediately with retry logic
+            const syncPromise = (typeof _syncCoinsToFirebase === 'function') 
+              ? _syncCoinsToFirebase(myUid, coinsWon, 'Demo Battle 🏆')
+              : Promise.reject('Sync function not available');
+            
+            syncPromise.then(success => {
+              if (success) {
+                localStorage.setItem(awardKey, '1');
+                // Refresh profile coins display
+                if (typeof window.refreshProfileCoinsDisplay === 'function') {
+                  setTimeout(() => { window.refreshProfileCoinsDisplay(); }, 300);
                 }
-              }).catch(() => {
-                // Fallback if Firebase sync fails
-                const u = window._firebaseAuth?.currentUser;
-                if (u) {
-                  const k = 'sscai_u:' + u.uid + ':coins';
-                  const cur = JSON.parse(localStorage.getItem(k) || '{"coins":0}');
-                  cur.coins = (cur.coins || 0) + coinsWon;
-                  localStorage.setItem(k, JSON.stringify(cur));
+                // Toast notification
+                if (typeof toast === 'function') {
+                  toast(`🪙 +${coinsWon} coins added to account! 🎉`, 2500);
                 }
-              });
-            }
-            if (typeof toast === 'function') {
-              toast(`🪙 +${coinsWon} coins earned! 🎉`, 2500);
-            }
+              }
+            }).catch(() => {
+              // Fallback: Write directly to Firestore if sync function fails
+              const db = window._firebaseDb;
+              const { doc, getDoc, updateDoc } = window._firebaseFns;
+              if (db && getDoc && updateDoc && myUid) {
+                getDoc(doc(db, 'users', myUid))
+                  .then(snap => {
+                    const currentCoins = snap.exists() ? (snap.data().coins || 0) : 0;
+                    return updateDoc(doc(db, 'users', myUid), {
+                      coins: currentCoins + coinsWon
+                    });
+                  })
+                  .then(() => {
+                    localStorage.setItem(awardKey, '1');
+                    if (typeof window.refreshProfileCoinsDisplay === 'function') {
+                      setTimeout(() => { window.refreshProfileCoinsDisplay(); }, 300);
+                    }
+                    if (typeof toast === 'function') {
+                      toast(`🪙 +${coinsWon} coins added to account! 🎉`, 2500);
+                    }
+                  })
+                  .catch(() => {
+                    // Final fallback: localStorage only
+                    const u = window._firebaseAuth?.currentUser;
+                    if (u) {
+                      const k = 'sscai_u:' + u.uid + ':coins';
+                      const cur = JSON.parse(localStorage.getItem(k) || '{"coins":0}');
+                      cur.coins = (cur.coins || 0) + coinsWon;
+                      localStorage.setItem(k, JSON.stringify(cur));
+                      localStorage.setItem(awardKey, '1');
+                    }
+                  });
+              }
+            });
           }
         }
         
@@ -2397,6 +2424,11 @@
             this._stopQuestionTimer();
             this._countdownShown = false;
             this._lastRenderHash = null;
+            this._activeTimers = this._activeTimers || {};
+            if (this._activeTimers[battleId]) {
+              clearInterval(this._activeTimers[battleId].intervalId);
+              delete this._activeTimers[battleId];
+            }
             this._renderBattleWinner(data);
             return;
           }
@@ -2832,12 +2864,11 @@
           </div>
           ${answered
             ? `<div class="ba-quiz-answered-banner ${answered.correct ? 'correct' : 'wrong'}">
-                ${answered.correct ? '✅ Correct!' : '❌ Wrong!'} 
-                <strong>${answered.name}</strong> answered first
-                ${answered.correct ? ' — <b>+10 XP</b>' : ''}
+                ${answered.correct ? '✅ Correct! <b>+10 XP</b>' : '❌ Wrong! <b>-3 XP</b>'} 
+                ${answered.correct ? '' : `<br><small>Answer: <b>${q.opts[q.ans] || ''}</b></small>`}
               </div>
               <div class="ba-quiz-exp">💡 ${q.exp || 'Great work!'}</div>`
-            : `<div class="ba-quiz-waiting"><div class="ba-quiz-waiting-text">⚡ Be first to answer!</div><div class="ba-quiz-waiting-sub">Correct answer earns +10 XP</div></div>`
+            : `<div class="ba-quiz-waiting"><div class="ba-quiz-waiting-text">⏱️ Take your time!</div><div class="ba-quiz-waiting-sub">Answer correctly to earn +10 XP</div></div>`
           }
           ${this._renderXPBoard(quiz, battle.playerNames)}
         </div>`;
@@ -3040,6 +3071,16 @@
           await this._saveToLeaderboard(myUid, myName, newXP);
           // TRACK BATTLE WIN: Only top-3 placements count as wins
           await this._trackBattleWin(battleId, myUid, myName, newXP, battle.quiz?.xp || {});
+          
+          // ── AWARD COINS TO USER ACCOUNT ──
+          const coinsEarned = await this._awardCoinsForBattle(battleId, myUid, myName, newXP, battle.quiz?.xp || {});
+          if (coinsEarned > 0) {
+            // Award coins via _syncCoinsToFirebase with full fallback chain
+            const syncSuccess = await _syncCoinsToFirebase(myUid, coinsEarned, 'Real Battle 🏆');
+            if (syncSuccess && typeof toast === 'function') {
+              toast(`🪙 +${coinsEarned} coins earned!`, 2000);
+            }
+          }
         }
 
       } catch(e) {
@@ -3083,6 +3124,34 @@
       } catch (e) {}
     },
 
+    // ── Award coins based on battle ranking ──
+    async _awardCoinsForBattle(battleId, myUid, myName, finalXP, allXP) {
+      const entries = Object.entries(allXP || {}).sort((a, b) => b[1] - a[1]);
+      const myRank = entries.findIndex(([u]) => u === myUid);
+      const totalPlayers = entries.length;
+      let coinsEarned = 0;
+
+      // Tiered coin rewards
+      if (totalPlayers >= 10) {
+        if (myRank === 0) coinsEarned = 25;
+        else if (myRank === 1) coinsEarned = 18;
+        else if (myRank === 2) coinsEarned = 8;
+        else if (myRank >= 3) coinsEarned = 2;
+      } else if (totalPlayers >= 5) {
+        if (myRank === 0) coinsEarned = 25;
+        else if (myRank === 1) coinsEarned = 15;
+        else if (myRank >= 2) coinsEarned = 2;
+      } else if (totalPlayers >= 2) {
+        if (myRank === 0) coinsEarned = 20;
+        else coinsEarned = 2;
+      } else {
+        // Solo
+        coinsEarned = 5;
+      }
+
+      return coinsEarned;
+    },
+
     /* ── Winner screen ── */
     _renderBattleWinner(battle) {
       const body = document.getElementById('ba-body');
@@ -3094,6 +3163,8 @@
       const myUid = uid();
       const playerNames = battle.playerNames || {};
       const players = (battle.players || []).length;
+      const db = window._firebaseDb;
+      const { doc, getDoc, updateDoc } = window._firebaseFns || {};
 
       // Coins: PROFESSIONAL TIERED MODEL
       const myRank = sorted.findIndex(([u]) => u === myUid);
@@ -3112,24 +3183,29 @@
         if (myRank === 0) coinsWon = 20;
         else coinsWon = 2;
       }
+      
       const awardKey = 'ba_coins_' + (battle.id || this._activeBattleId) + '_' + myUid;
       if (coinsWon > 0 && !localStorage.getItem(awardKey)) {
-        _syncCoinsToFirebase(myUid, coinsWon, 'Real Battle 🏆').then(success => {
-          if (success) {
-            localStorage.setItem(awardKey, '1');
-            // Refresh profile coins display if open
-            if (typeof window.refreshProfileCoinsDisplay === 'function') {
-              setTimeout(() => { window.refreshProfileCoinsDisplay(); }, 300);
+        // Use standard _syncCoinsToFirebase which handles all fallbacks
+        if (typeof _syncCoinsToFirebase === 'function') {
+          _syncCoinsToFirebase(myUid, coinsWon, 'Real Battle 🏆').then(syncSuccess => {
+            if (syncSuccess) {
+              localStorage.setItem(awardKey, '1');
+              if (typeof window.refreshProfileCoinsDisplay === 'function') {
+                setTimeout(() => { window.refreshProfileCoinsDisplay(); }, 300);
+              }
             }
-          }
-        }).catch(() => {
-          // Firebase sync failed but coins may be in localStorage
-        });
+          }).catch(() => {
+            // Fallback handled by _syncCoinsToFirebase
+          });
+        }
+        
         if (typeof toast === 'function') {
           toast(`🪙 +${coinsWon} coins earned! 🏆`, 2500);
         }
       }
-      // Update the coins display after awarding (slight delay so addCoins finishes)
+      
+      // Update the coins display after awarding (slight delay so coins finish syncing)
       setTimeout(() => {
         const el = document.getElementById('ba-winner-coins-display');
         if (!el) return;
@@ -3146,7 +3222,7 @@
         const db = window._firebaseDb; const fns = window._firebaseFns;
         const u = window._firebaseAuth?.currentUser;
         if (db && fns && u) {
-          fns.getDoc(fns.doc(db, 'userCoins', u.uid)).then(snap => {
+          fns.getDoc(fns.doc(db, 'users', u.uid)).then(snap => {
             if (snap && snap.exists()) {
               const sc = snap.data().coins || 0;
               const badge = document.querySelector('.ba-coins-badge, #ba-coins-display');
@@ -4887,12 +4963,6 @@
     const playerNames = battle?.playerNames || {};
     const questions = battle?.questions || [];
 
-    // Fastest Answer: player who first answered correctly across all questions
-    let fastestUid = null, fastestTs = Infinity;
-    Object.values(answers).forEach(a => {
-      if (a.correct && a.ts < fastestTs) { fastestTs = a.ts; fastestUid = a.uid; }
-    });
-
     // Accuracy King: player with most correct answers
     const correctCount = {};
     Object.values(answers).forEach(a => {
@@ -4920,8 +4990,6 @@
     });
 
     return {
-      fastest: fastestUid ? playerNames[fastestUid] || 'Unknown' : null,
-      fastestTs,
       accuracyKing: accuracyKingUid ? playerNames[accuracyKingUid] || 'Unknown' : null,
       accuracyKingCount,
       totalQ: questions.length,
@@ -5316,16 +5384,10 @@
         </div>
 
         <!-- Highlights -->
-        ${(h.fastest || h.accuracyKing || h.comeback) ? `
+        ${(h.accuracyKing || h.comeback) ? `
         <div class="ba-highlights-wrap">
           <div class="ba-highlights-title">⭐ Battle Highlights</div>
           <div class="ba-highlights-grid">
-            ${h.fastest ? `
-            <div class="ba-highlight-card">
-              <div class="ba-highlight-icon">⚡</div>
-              <div class="ba-highlight-label">Fastest</div>
-              <div class="ba-highlight-name">${h.fastest}</div>
-            </div>` : ''}
             ${h.accuracyKing ? `
             <div class="ba-highlight-card">
               <div class="ba-highlight-icon">🎯</div>
@@ -5566,11 +5628,10 @@
           </div>
           ${EloWidget.renderProgress()}
         </div>
-        ${(h.fastest || h.accuracyKing || h.comeback) ? `
+        ${(h.accuracyKing || h.comeback) ? `
         <div class="ba-highlights-wrap">
           <div class="ba-highlights-title">⭐ Battle Highlights</div>
           <div class="ba-highlights-grid">
-            ${h.fastest ? `<div class="ba-highlight-card"><div class="ba-highlight-icon">⚡</div><div class="ba-highlight-label">Fastest Answer</div><div class="ba-highlight-name">${h.fastest}</div></div>` : ''}
             ${h.accuracyKing ? `<div class="ba-highlight-card"><div class="ba-highlight-icon">🎯</div><div class="ba-highlight-label">Accuracy King</div><div class="ba-highlight-name">${h.accuracyKing}</div></div>` : ''}
             ${h.comeback ? `<div class="ba-highlight-card"><div class="ba-highlight-icon">🔥</div><div class="ba-highlight-label">Comeback Player</div><div class="ba-highlight-name">${h.comeback}</div></div>` : `<div class="ba-highlight-card"><div class="ba-highlight-icon">🏅</div><div class="ba-highlight-label">MVP</div><div class="ba-highlight-name">${sorted[0] ? (memberNames?.[sorted[0][0]] || 'Player') : '—'}</div></div>`}
           </div>
