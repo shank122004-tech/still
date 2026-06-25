@@ -715,7 +715,34 @@
       .ba-quiz-opt.wrong .ba-opt-letter {
         background: rgba(248,113,113,0.2); border-color: rgba(248,113,113,0.4); color: #f87171;
       }
-      .ba-opt-text { flex: 1; line-height: 1.4; }
+      .ba-q-indicators {
+        display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 12px; padding: 0 4px;
+      }
+      .ba-q-indicator {
+        width: 20px; height: 20px; border-radius: 50%; background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(108,99,255,0.15); font-size: 10px; display: flex;
+        align-items: center; justify-content: center; flex-shrink: 0;
+        transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+      }
+      .ba-q-indicator.done {
+        background: rgba(74,222,128,0.2); border-color: #4ade80; color: #4ade80;
+        box-shadow: 0 0 8px rgba(74,222,128,0.2);
+      }
+      .ba-q-indicator.active {
+        background: linear-gradient(135deg,#6C63FF,#FF6B9D); border-color: #6C63FF;
+        transform: scale(1.1); box-shadow: 0 0 12px rgba(108,99,255,0.4);
+      }
+      .ba-q-indicator.answered {
+        background: rgba(34,197,94,0.3); border-color: rgba(74,222,128,0.5);
+      }
+      .ba-q-fadeIn {
+        animation: ba-q-fade 0.25s ease-out;
+      }
+      @keyframes ba-q-fade {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
 
       /* Answer feedback banner */
       .ba-quiz-answered-banner {
@@ -1739,12 +1766,22 @@
 
     /* ── Open Premium Modal scrolled to Battle Creator section ── */
     _openBattlePlanModal() {
+      // Close battle arena modal so premium modal appears on top
+      const baModal = document.getElementById('ba-modal');
+      if (baModal) {
+        baModal.classList.remove('open');
+        baModal.style.display = 'none';
+      }
+      
       // 1. Open the premium modal
       if (typeof openPremiumModal === 'function') openPremiumModal();
       else if (typeof window.showPremiumModal === 'function') window.showPremiumModal();
       else {
         const m = document.getElementById('premiumModal');
-        if (m) m.classList.add('active');
+        if (m) {
+          m.classList.add('active');
+          m.style.zIndex = '999999';
+        }
       }
       // 2. After modal renders, scroll to the Battle Creator card
       setTimeout(function () {
@@ -1768,6 +1805,23 @@
           }
         } catch (e) {}
       }, 320);
+      
+      // Re-open battle arena when premium modal closes
+      const observer = new MutationObserver(() => {
+        const m = document.getElementById('premiumModal');
+        if (m && !m.classList.contains('active')) {
+          const baModal = document.getElementById('ba-modal');
+          if (baModal) {
+            baModal.style.display = 'flex';
+            baModal.classList.add('open');
+          }
+          observer.disconnect();
+        }
+      });
+      const premiumModal = document.getElementById('premiumModal');
+      if (premiumModal) {
+        observer.observe(premiumModal, { attributes: true, attributeFilter: ['class'] });
+      }
     },
 
     /* ── Create Battle Form ── */
@@ -2458,13 +2512,25 @@
       }
       this._lastRenderHash = renderHash;
 
+      // Calculate progress percentage
+      const progressPct = ((qi + 1) / questions.length) * 100;
+      const questionIndicators = questions.map((_, idx) => {
+        let status = idx < qi ? 'done' : idx === qi ? 'active' : 'pending';
+        if (quiz.answers && (quiz.answers[idx] || quiz.answers[String(idx)])) status = 'answered';
+        return `<div class="ba-q-indicator ${status}" title="Q ${idx+1}"></div>`;
+      }).join('');
+
       body.innerHTML = `
         <div class="ba-active-wrap">
           <div class="ba-quiz-header">
             <span class="ba-quiz-num-pill">Q ${qi+1} <span style="opacity:0.5;">/ ${questions.length}</span></span>
             <span class="ba-quiz-xp-pill">⚡ ${quiz.xp && quiz.xp[myUid] ? quiz.xp[myUid] : 0} XP</span>
           </div>
-          <div class="ba-quiz-bar"><div class="ba-quiz-bar-fill" style="width:${(qi/questions.length)*100}%"></div></div>
+          <div style="display:flex;gap:4px;margin-bottom:12px;align-items:center;">
+            <div class="ba-quiz-bar"><div class="ba-quiz-bar-fill" style="width:${progressPct}%"></div></div>
+            <span style="font-size:10px;color:rgba(200,195,255,0.4);font-weight:700;min-width:26px;text-align:right;">${Math.round(progressPct)}%</span>
+          </div>
+          <div class="ba-q-indicators">${questionIndicators}</div>
           <div class="ba-quiz-timer-wrap">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
               <span style="font-size:10px;font-weight:700;letter-spacing:0.06em;color:rgba(200,195,255,0.35);text-transform:uppercase;">⏱ Time</span>
@@ -2472,7 +2538,7 @@
             </div>
             <div class="ba-quiz-timer-bar"><div id="ba-qtimer-fill" class="ba-quiz-timer-fill" style="width:100%"></div></div>
           </div>
-          <div class="ba-quiz-q-card"><div class="ba-quiz-q-label">Question</div><div class="ba-quiz-q">${q.q}</div></div>
+          <div class="ba-quiz-q-card ba-q-fadeIn"><div class="ba-quiz-q-label">Question</div><div class="ba-quiz-q">${q.q}</div></div>
           <div class="ba-quiz-opts">
             ${q.opts.map((o,j) => {
               let cls = 'ba-quiz-opt';
@@ -3158,7 +3224,7 @@
           }
         }
 
-        // ── CRITICAL: Enrich entries with real user names AND avatars from Firestore ──
+        // ── CRITICAL: Enrich entries with real user names from Firestore ──
         // If an entry has uid but no/empty name, fetch from users/{uid} document
         const enrichedEntries = [];
         for (const e of weeklyEntries) {
@@ -3176,14 +3242,6 @@
                 } else if (userData.email) {
                   const prefix = userData.email.split('@')[0];
                   entry.name = prefix.charAt(0).toUpperCase() + prefix.slice(1);
-                }
-                // Fetch photoURL (avatar) from users collection if not in entry
-                if (!entry.photoURL && userData.photoURL) {
-                  entry.photoURL = userData.photoURL;
-                }
-                // Fetch equipped shop avatar from users collection if not in entry
-                if (!entry.equippedAvatar && userData.equippedAvatar) {
-                  entry.equippedAvatar = userData.equippedAvatar;
                 }
               }
             } catch(err) {}
@@ -3299,9 +3357,9 @@
         const _lbAvatarHtml = (e, levelData) => {
           const initial = (e.name||'?').charAt(0).toUpperCase();
           // 1) Shop avatar emoji (stored in entry or read from local for "me")
-          let shopEmoji = e.avatar || e.equippedAvatar || null;
+          let shopEmoji = e.avatar || null;
           if (!shopEmoji && e.uid === myUid) {
-            // Read from either cosmetics system for current user
+            // Read from either cosmetics system
             try {
               const uid2 = myUid;
               // battle-arena style key
@@ -3320,17 +3378,8 @@
               }
             } catch(ex) {}
           }
-          // If equipped avatar exists, convert to emoji for display
-          if (shopEmoji && !shopEmoji.match(/^[a-z]/i)) {
-            // Already an emoji
+          if (shopEmoji) {
             return `<div class="lb-avatar" style="background:linear-gradient(135deg,${levelData.color}44,${levelData.color}22);font-size:20px;">${shopEmoji}</div>`;
-          } else if (shopEmoji) {
-            // It's an avatar ID like 'av_fire', convert to emoji
-            const emojiMap = { av_fire:'🔥', av_crown:'👑', av_brain:'🧠', av_star:'🌟', av_lightning:'⚡', av_shield:'🛡️', av_gem:'💎', av_rocket:'🚀', av_ninja:'🥷', av_robot:'🤖', av_dragon:'🐉', av_diamond:'💎', av_wizard:'🧙', av_astronaut:'🧑‍🚀', av_galaxy:'🌌', av_phantom:'👻', av_tiger:'🐯', av_frankenstein:'👹' };
-            const emoji = emojiMap[shopEmoji] || null;
-            if (emoji) {
-              return `<div class="lb-avatar" style="background:linear-gradient(135deg,${levelData.color}44,${levelData.color}22);font-size:20px;">${emoji}</div>`;
-            }
           }
           // 2) Google profile photo (stored in entry or from state for "me")
           let photoURL = e.photoURL || null;
@@ -3419,7 +3468,7 @@
           entries = snap2.docs.map(d => d.data()).filter(e => !e._demo);
         }
         
-        // ── CRITICAL: Enrich entries with real user names AND avatars from Firestore ──
+        // ── CRITICAL: Enrich entries with real user names from Firestore ──
         // If an entry has uid but no/empty name, fetch from users/{uid} document
         const enrichedEntries = [];
         for (const e of entries) {
@@ -3437,14 +3486,6 @@
                 } else if (userData.email) {
                   const prefix = userData.email.split('@')[0];
                   entry.name = prefix.charAt(0).toUpperCase() + prefix.slice(1);
-                }
-                // Fetch photoURL (avatar) from users collection if not in entry
-                if (!entry.photoURL && userData.photoURL) {
-                  entry.photoURL = userData.photoURL;
-                }
-                // Fetch equipped shop avatar from users collection if not in entry
-                if (!entry.equippedAvatar && userData.equippedAvatar) {
-                  entry.equippedAvatar = userData.equippedAvatar;
                 }
               }
             } catch(err) {}
@@ -4043,19 +4084,11 @@
 
   function coinPrize(rank0, totalPlayers) {
     if (totalPlayers <= 1) return 0;
-    if (totalPlayers >= 10) {
-      if (rank0 === 0) return 50;
-      if (rank0 === 1) return 30;
-      if (rank0 === 2) return 15;
-      return 0;
-    }
-    if (totalPlayers >= 5) {
-      if (rank0 === 0) return 50;
-      if (rank0 === 1) return 30;
-      return 0;
-    }
-    // 2–4 players: winner only
-    return rank0 === 0 ? 50 : 0;
+    if (rank0 === 0) return 25;
+    if (rank0 === 1) return 15;
+    if (rank0 === 2) return 8;
+    if (rank0 >= 3) return 2;
+    return 0;
   }
 
   function _syncCoinsToFirestore(total) {
@@ -4147,12 +4180,11 @@
   function coinHelpHtml() {
     return `<div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:12px;padding:12px 14px;font-size:12px;line-height:1.7;color:rgba(255,220,150,0.85);">
       <strong>How to earn coins:</strong><br>
-      🏆 <strong>Battle Arena</strong> — winners only:<br>
-      &nbsp;&nbsp;• 🥇 1st place (10 players): <strong>+50 coins</strong><br>
-      &nbsp;&nbsp;• 🥈 2nd place (10 players): <strong>+30 coins</strong><br>
-      &nbsp;&nbsp;• 🥉 3rd place (10 players): <strong>+15 coins</strong><br>
-      &nbsp;&nbsp;• With 5–9 players: top 2 win coins<br>
-      &nbsp;&nbsp;• With 2–4 players: winner only<br>
+      🏆 <strong>Battle Arena</strong> — all participants earn:<br>
+      &nbsp;&nbsp;• 🥇 1st place: <strong>+25 coins</strong><br>
+      &nbsp;&nbsp;• 🥈 2nd place: <strong>+15 coins</strong><br>
+      &nbsp;&nbsp;• 🥉 3rd place: <strong>+8 coins</strong><br>
+      &nbsp;&nbsp;• 4th+ place: <strong>+2 coins</strong><br>
       <span style="font-size:10px;color:rgba(200,195,255,0.4);">Coins are for cosmetics only — not real money. Group Study does NOT earn coins.</span>
     </div>`;
   }
@@ -4424,20 +4456,6 @@
       if (pfOwned.length) appCos['owned_frame']  = pfOwned;
       localStorage.setItem('sscai_cosmetics', JSON.stringify(appCos));
     } catch(ex) {}
-    
-    // ★ SYNC equipped avatar to Firestore users collection ★
-    try {
-      const db = window._firebaseDb;
-      const { doc, updateDoc } = window._firebaseFns;
-      const u = window._firebaseAuth && window._firebaseAuth.currentUser;
-      if (db && u && u.uid && d.activeAvatar) {
-        updateDoc(doc(db, 'users', u.uid), { 
-          equippedAvatar: d.activeAvatar,
-          equippedAvatarUpdatedAt: Date.now()
-        }).catch(err => {}); // Silent fail if offline
-      }
-    } catch(ex) {}
-    
     // Trigger applyEquippedCosmetics in app.js so all profile pics update immediately
     if (typeof window.applyEquippedCosmetics === 'function') {
       try { window.applyEquippedCosmetics(); } catch(ex) {}
