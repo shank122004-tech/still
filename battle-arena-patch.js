@@ -850,6 +850,10 @@
       .ba-result-stat:first-child { border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.05); }
       .ba-result-stat-val { font-size: 20px; font-weight: 900; color: #f59e0b; }
       .ba-result-stat-lbl { font-size: 10px; color: rgba(200,195,255,0.45); margin-top: 4px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+      .ba-result-stat-score { font-size: 14px; color: #a78bfa; font-weight: 700; margin-top: 6px; }
+      .ba-result-stat-me { border-color: #6C63FF !important; background: rgba(108,99,255,0.12) !important; }
+      .ba-results-title { font-size: 12px; font-weight: 900; color: rgba(200,195,255,0.5); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; text-align: center; }
+      @keyframes ba-coin-bounce { 0%{transform:scale(0.5);opacity:0} 50%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
 
       /* ── Leaderboard ── */
       .lb-tab-row { display: flex; gap: 10px; margin-bottom: 18px; }
@@ -1550,11 +1554,16 @@
 
       // ── Render question ──
       const _demoShowQuestion = () => {
-        if (this._activeBattleId !== demoId) return;
         clearTimeout(demoState.botAutoTimer); clearTimeout(demoState.nextQTimer);
         const qi = demoState.qi;
         const q  = demoState.questions && demoState.questions[qi];
-        if (!q || !q.opts || qi >= 10) { _demoResults(); return; }
+        // Check if battle is over (reached question limit or no more questions)
+        if (!q || !q.opts || qi >= 10) { 
+          _demoResults(); 
+          return; 
+        }
+        // Only proceed if still in active demo battle
+        if (this._activeBattleId !== demoId) return;
         demoState.answered = false;
 
         const _xpBoardHtml = () => {
@@ -1647,12 +1656,15 @@
 
       // ── Results ──
       const _demoResults = () => {
-        if (this._activeBattleId !== demoId) return;
+        const body = document.getElementById('ba-body');
+        if (!body) return;
+        if (this._activeBattleId !== demoId && demoState.qi < 10) return; // Only skip if not the final question
         clearTimeout(demoState.botAutoTimer); clearTimeout(demoState.nextQTimer); clearTimeout(demoState.fakeJoinTimer);
         const sorted = Object.entries(demoState.xp).sort((a,b)=>b[1]-a[1]);
         const myRank = sorted.findIndex(([u]) => u === myUid);
         const myXP   = demoState.xp[myUid] || 0;
-        let coinsWon = myRank === 0 ? 25 : myRank === 1 ? 18 : myRank === 2 ? 8 : myRank >= 3 ? 2 : 0;
+        // New coin system: 1st=25, 2nd=15, 3rd=8, rest=2
+        let coinsWon = myRank === 0 ? 25 : myRank === 1 ? 15 : myRank === 2 ? 8 : myRank >= 3 ? 2 : 0;
         if (coinsWon > 0) {
           const awardKey = 'ba_coins_demo_' + demoId + '_' + myUid;
           if (!localStorage.getItem(awardKey)) {
@@ -1708,15 +1720,27 @@
         const winnerEntry = sorted[0];
         const winnerName  = winnerEntry ? (demoState.playerNamesMap[winnerEntry[0]] || 'Player') : '—';
         const iWon = winnerEntry && winnerEntry[0] === myUid;
+        
+        // Show all players in results (not just top 6)
+        const allPlayersHtml = sorted.map(([u,x],i) => {
+          const isMe = u === myUid;
+          return `<div class="ba-result-stat ${isMe ? 'ba-result-stat-me' : ''}">
+            <div class="ba-result-stat-val">${['🥇','🥈','🥉'][i]||'#'+(i+1)}</div>
+            <div class="ba-result-stat-lbl">${demoState.playerNamesMap[u]||'Player'}</div>
+            <div class="ba-result-stat-score">${x} XP</div>
+          </div>`;
+        }).join('');
+        
         body.innerHTML = `
-          ${coinsWon > 0 ? `<div style="text-align:center;font-size:18px;font-weight:800;color:#f59e0b;margin-bottom:8px;">🪙 +${coinsWon} Coins Earned!</div>` : ''}
+          ${coinsWon > 0 ? `<div style="text-align:center;font-size:20px;font-weight:900;color:#f59e0b;margin-bottom:12px;animation:ba-coin-bounce 0.6s cubic-bezier(0.34,1.56,0.64,1);">🪙 +${coinsWon} Coins!</div>` : ''}
           <div class="ba-winner-wrap">
-            <div class="ba-winner-trophy">${iWon ? '🏆' : '🎯'}</div>
-            <div class="ba-winner-title">Battle Over!</div>
-            <div class="ba-winner-name">🥇 Winner: <strong style="color:#f59e0b">${winnerName}</strong> with ${winnerEntry ? winnerEntry[1] : 0} XP</div>
+            <div class="ba-winner-trophy" style="animation:ba-trophy-in 0.6s cubic-bezier(0.34,1.56,0.64,1);">${iWon ? '🏆' : '🎯'}</div>
+            <div class="ba-winner-title">${iWon ? 'You Won!' : 'Battle Over!'}</div>
+            <div class="ba-winner-name">🥇 <strong style="color:#f59e0b">${winnerName}</strong> won with ${winnerEntry ? winnerEntry[1] : 0} XP</div>
           </div>
+          <div class="ba-results-title">Final Scores</div>
           <div class="ba-results-grid">
-            ${sorted.slice(0,6).map(([u,x],i) => `<div class="ba-result-stat"><div class="ba-result-stat-val">${['🥇','🥈','🥉'][i]||'#'+(i+1)} ${x}</div><div class="ba-result-stat-lbl">${demoState.playerNamesMap[u]||'Player'} XP</div></div>`).join('')}
+            ${allPlayersHtml}
           </div>
           <div style="text-align:center;margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
             <button class="ba-join-btn" onclick="BA._demoLeave('${demoId}')">← Back to Arena</button>
