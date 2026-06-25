@@ -435,6 +435,126 @@
     return xp;
   }
 
+  const _syncCoinsToFirebase = async (userUid, coinsToAdd, reason) => {
+    if (!userUid || coinsToAdd <= 0) return false;
+    try {
+      const db = window._firebaseDb;
+      const { doc, updateDoc, increment, setDoc, getDoc } = window._firebaseFns;
+      
+      const coinsKey = 'sscai_u:' + userUid + ':coins';
+      const current = JSON.parse(localStorage.getItem(coinsKey) || '{"coins":0}');
+      current.coins = (current.coins || 0) + coinsToAdd;
+      localStorage.setItem(coinsKey, JSON.stringify(current));
+      
+      try {
+        const docRef = doc(db, 'userCoins', userUid);
+        const snap = await getDoc(docRef);
+        
+        if (snap.exists()) {
+          await updateDoc(docRef, {
+            coins: increment(coinsToAdd),
+            lastUpdated: Date.now(),
+            lastReason: reason || 'Battle'
+          });
+        } else {
+          await setDoc(docRef, {
+            coins: coinsToAdd,
+            lastUpdated: Date.now(),
+            lastReason: reason || 'Battle',
+            createdAt: Date.now()
+          });
+        }
+      } catch (fbErr) {
+        // Continue even if Firestore fails
+      }
+      
+      const badge = document.querySelector('.ba-coins-badge, [data-coins-display]');
+      if (badge) {
+        badge.textContent = '🪙 ' + current.coins;
+        badge.style.animation = 'none';
+        setTimeout(() => { badge.style.animation = 'ba-coin-bounce 0.6s ease'; }, 10);
+      }
+      
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const BattleTimer = {
+    _activeTimers: {},
+    
+    start(battleId, durationSeconds = 300) {
+      if (!battleId) return 0;
+      this.end(battleId);
+      
+      const startTime = Date.now();
+      const endTime = startTime + (durationSeconds * 1000);
+      
+      this._activeTimers[battleId] = {
+        startTime,
+        endTime,
+        durationSeconds,
+        intervalId: null
+      };
+      
+      const timerState = this._activeTimers[battleId];
+      const updateDisplay = () => {
+        const now = Date.now();
+        const remaining = Math.max(0, endTime - now);
+        const seconds = Math.ceil(remaining / 1000);
+        
+        const timerEl = document.querySelector('[data-battle-timer]');
+        if (timerEl) {
+          const mins = Math.floor(seconds / 60);
+          const secs = seconds % 60;
+          timerEl.textContent = `⏱️ ${mins}:${secs.toString().padStart(2, '0')}`;
+          
+          if (seconds <= 60 && seconds > 0) {
+            timerEl.style.color = '#ef4444';
+            timerEl.style.fontWeight = '900';
+          } else if (seconds === 0) {
+            timerEl.style.color = '#dc2626';
+            timerEl.textContent = '⏱️ 0:00';
+          }
+        }
+        
+        if (remaining <= 0) {
+          this.end(battleId);
+          if (typeof BA !== 'undefined' && BA._endBattleByTimer) {
+            BA._endBattleByTimer(battleId);
+          }
+        }
+      };
+      
+      timerState.intervalId = setInterval(updateDisplay, 1000);
+      updateDisplay();
+      
+      return endTime;
+    },
+    
+    end(battleId) {
+      if (this._activeTimers[battleId]) {
+        if (this._activeTimers[battleId].intervalId) {
+          clearInterval(this._activeTimers[battleId].intervalId);
+        }
+        delete this._activeTimers[battleId];
+      }
+    },
+    
+    getRemainingSeconds(battleId) {
+      if (!this._activeTimers[battleId]) return 0;
+      const remaining = Math.max(0, this._activeTimers[battleId].endTime - Date.now());
+      return Math.ceil(remaining / 1000);
+    },
+    
+    isExpired(battleId) {
+      return this.getRemainingSeconds(battleId) === 0;
+    }
+  };
+
+  window.BattleTimer = BattleTimer;
+
   function getBattleCreatorUsage() {
     const data = lsGet('battle_creator_usage') || { count: 0, month: '' };
     const thisMonth = new Date().getFullYear() + '_' + new Date().getMonth();
@@ -1436,6 +1556,7 @@
         fakeJoinTimer: null,
         nextQTimer: null,
         examKey: demoDef._examKey || 'cgl',
+        resultsShown: false,
       };
       let joinedCount = allPlayers.length;
 
@@ -1658,7 +1779,9 @@
       const _demoResults = () => {
         const body = document.getElementById('ba-body');
         if (!body) return;
-        if (this._activeBattleId !== demoId && demoState.qi < 10) return; // Only skip if not the final question
+        if (this._activeBattleId !== demoId) return;
+        if (demoState.resultsShown) return;
+        demoState.resultsShown = true;
         clearTimeout(demoState.botAutoTimer); clearTimeout(demoState.nextQTimer); clearTimeout(demoState.fakeJoinTimer);
         const sorted = Object.entries(demoState.xp).sort((a,b)=>b[1]-a[1]);
         const myRank = sorted.findIndex(([u]) => u === myUid);
@@ -1669,7 +1792,10 @@
           const awardKey = 'ba_coins_demo_' + demoId + '_' + myUid;
           if (!localStorage.getItem(awardKey)) {
             localStorage.setItem(awardKey, '1');
-            if (typeof window.addCoins === 'function') window.addCoins(coinsWon, 'Battle win 🏆');
+            _syncCoinsToFirebase(myUid, coinsWon, 'Demo Battle 🏆');
+            if (typeof toast === 'function') {
+              toast(`🪙 +${coinsWon} coins earned! 🎉`, 2500);
+            }
           }
         }
         addBattleXP(myXP);
@@ -2715,12 +2841,13 @@
         const battle = snap.data();
         const quiz = battle.quiz || {};
 
-        // Already answered check — use string key (Firestore stores as strings)
-        if (quiz.answers && (quiz.answers[qi] || quiz.answers[String(qi)])) {
+        // ✅ INDIVIDUAL USER TRACKING: Each user answers independently
+        // Check if THIS USER already answered this question
+        const myAnswerKey = 'user_answer_' + myUid + '_q' + qi;
+        if (quiz.answers && quiz.answers[myAnswerKey]) {
           this._answerSubmitting = false;
-          return;
+          return; // User already answered this question
         }
-        if (quiz.current !== qi) { this._answerSubmitting = false; return; }
 
         const q = battle.questions[qi];
         if (!q) { this._answerSubmitting = false; return; }
@@ -2760,8 +2887,11 @@
 
         // ── WRITE to Firestore (background — UI already updated) ──
         const updates = {
-          ['quiz.answers.' + String(qi)]: { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
+          ['quiz.answers.' + 'user_' + myUid + '_q' + String(qi)]: 
+            { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
           ['quiz.xp.' + myUid]: newXP,
+          ['quiz.userProgress.' + myUid]: nextIdx,
+          ['quiz.answers.' + String(qi)]: { uid: myUid, name: myName, chosen: chosenIdx, correct, ts: Date.now() },
           ['quiz.current']: isLast ? qi : nextIdx,
           ['quiz.status']: isLast ? 'finished' : 'active',
           ['quiz.questionStartedAt']: isLast ? (quiz.questionStartedAt || questionStartTs) : questionStartTs,
@@ -2860,25 +2990,10 @@
       const awardKey = 'ba_coins_' + (battle.id || this._activeBattleId) + '_' + myUid;
       if (coinsWon > 0 && !localStorage.getItem(awardKey)) {
         localStorage.setItem(awardKey, '1');
-        // Use window.addCoins — defined in second IIFE; call after short delay
-        // to ensure the second IIFE has initialised addCoins on window
-        const _doAward = () => {
-          if (typeof window.addCoins === 'function') {
-            window.addCoins(coinsWon, 'Battle win 🏆');
-          } else {
-            // Fallback: write directly to localStorage using same key format
-            try {
-              const u = window._firebaseAuth?.currentUser;
-              const k = 'sscai_u:' + (u ? u.uid : 'guest') + ':coins';
-              const cur = JSON.parse(localStorage.getItem(k) || '{"coins":0}');
-              cur.coins = (cur.coins || 0) + coinsWon;
-              localStorage.setItem(k, JSON.stringify(cur));
-              if (typeof showToast === 'function') showToast(`🪙 +${coinsWon} coins! (Battle win 🏆)`, 2500);
-            } catch(_) {}
-          }
-        };
-        if (typeof window.addCoins === 'function') { _doAward(); }
-        else { setTimeout(_doAward, 300); }
+        _syncCoinsToFirebase(myUid, coinsWon, 'Real Battle 🏆');
+        if (typeof toast === 'function') {
+          toast(`🪙 +${coinsWon} coins earned! 🏆`, 2500);
+        }
       }
       // Update the coins display after awarding (slight delay so addCoins finishes)
       setTimeout(() => {
@@ -3078,10 +3193,28 @@
           } catch(e) {}
         }
         
-        // Get coins from localStorage
-        const coinsKey = 'sscai_u:' + userUid + ':coins';
-        const coinsData = JSON.parse(localStorage.getItem(coinsKey) || '{"coins":0}');
-        const totalCoins = coinsData.coins || 0;
+        // ✅ GET COINS FROM FIRESTORE FIRST (source of truth)
+        let totalCoins = 0;
+        try {
+          const coinsSnap = await getDoc(doc(db, 'userCoins', userUid));
+          if (coinsSnap.exists()) {
+            totalCoins = coinsSnap.data().coins || 0;
+          } else {
+            // Create if doesn't exist
+            await setDoc(doc(db, 'userCoins', userUid), {
+              coins: 0,
+              lastUpdated: Date.now(),
+              createdAt: Date.now()
+            });
+          }
+        } catch(fbErr) {
+          // Fallback to localStorage if Firestore fails
+          try {
+            const coinsKey = 'sscai_u:' + userUid + ':coins';
+            const coinsData = JSON.parse(localStorage.getItem(coinsKey) || '{"coins":0}');
+            totalCoins = coinsData.coins || 0;
+          } catch(_) {}
+        }
 
         // Grab photoURL + equipped avatar to show in leaderboard
         const _lbPhotoURL = (() => { try { const u = window._firebaseAuth && window._firebaseAuth.currentUser; return (u && u.photoURL) ? u.photoURL : ''; } catch(e) { return ''; } })();
