@@ -2950,11 +2950,6 @@
         
         await updateDoc(doc(db, 'publicBattles', battleId), updates);
       } catch(e) {}
-        await updateDoc(doc(db, 'publicBattles', battleId), updates);
-        if (isLast && this._activeBattleId) {
-          setTimeout(() => this._pollGameBattle(this._activeBattleId), 300);
-        }
-      } catch(e) {}
     },
 
     async _submitAnswer(battleId, qi, chosenIdx) {
@@ -3391,15 +3386,28 @@
         const _lbPhotoURL = (() => { try { const u = window._firebaseAuth && window._firebaseAuth.currentUser; return (u && u.photoURL) ? u.photoURL : ''; } catch(e) { return ''; } })();
         const _lbAvatar = (() => {
           try {
-            const baCos = JSON.parse(localStorage.getItem('sscai_u:'+userUid+':cosmetics') || 'null');
-            if (baCos && baCos.activeAvatar) {
-              const em = { av_fire:'🔥', av_crown:'👑', av_brain:'🧠', av_star:'🌟', av_lightning:'⚡', av_shield:'🛡️', av_gem:'💎', av_rocket:'🚀', av_ninja:'🥷', av_robot:'🤖', av_dragon:'🐉', av_diamond:'💎' };
-              return em[baCos.activeAvatar] || '';
-            }
-            const appCos = JSON.parse(localStorage.getItem('sscai_cosmetics') || '{}');
-            if (appCos.equipped_avatar) {
-              const em2 = { av_fire:'🔥', av_star:'⭐', av_rocket:'🚀', av_crown:'👑', av_ninja:'🥷', av_robot:'🤖', av_dragon:'🐉', av_diamond:'💎', av_lightning:'⚡' };
-              return em2[appCos.equipped_avatar] || '';
+            // READ FROM CORRECT shop_owned KEY where purchased avatars are stored
+            const shopKey = 'sscai_u:' + userUid + ':shop_owned';
+            const shopData = JSON.parse(localStorage.getItem(shopKey) || '{"owned":[],"equipped":{}}');
+            const equippedAvatarId = shopData.equipped && shopData.equipped.avatars;
+            
+            if (equippedAvatarId) {
+              // Map avatar IDs to emojis
+              const emojiMap = {
+                'av_fire': '🔥',
+                'av_crown': '👑',
+                'av_brain': '🧠',
+                'av_star': '⭐',
+                'av_lightning': '⚡',
+                'av_shield': '🛡️',
+                'av_gem': '💎',
+                'av_rocket': '🚀',
+                'av_ninja': '🥷',
+                'av_robot': '🤖',
+                'av_dragon': '🐉',
+                'av_diamond': '💎'
+              };
+              return emojiMap[equippedAvatarId] || '';
             }
           } catch(e) {}
           return '';
@@ -3687,22 +3695,21 @@
           // 1) Shop avatar emoji (stored in entry or read from local for "me")
           let shopEmoji = e.avatar || null;
           if (!shopEmoji && e.uid === myUid) {
-            // Read from either cosmetics system
+            // Read from shop_owned key (where purchased avatars are stored)
             try {
               const uid2 = myUid;
-              // battle-arena style key
-              const baCos = JSON.parse(localStorage.getItem('sscai_u:'+uid2+':cosmetics') || 'null');
-              if (baCos && baCos.activeAvatar && baCos.activeAvatar !== 'av_rocket') {
-                const emojiMap = { av_fire:'🔥', av_crown:'👑', av_brain:'🧠', av_star:'🌟', av_lightning:'⚡', av_shield:'🛡️', av_gem:'💎', av_rocket:'🚀', av_ninja:'🥷', av_robot:'🤖', av_dragon:'🐉', av_diamond:'💎', av_wizard:'🧙', av_astronaut:'🧑‍🚀', av_galaxy:'🌌', av_phantom:'👻', av_tiger:'🐯' };
-                shopEmoji = emojiMap[baCos.activeAvatar] || null;
-              }
-              if (!shopEmoji) {
-                // app.js style key (sscai_cosmetics)
-                const appCos = JSON.parse(localStorage.getItem('sscai_cosmetics') || '{}');
-                if (appCos.equipped_avatar) {
-                  const emojiMap2 = { av_fire:'🔥', av_star:'⭐', av_rocket:'🚀', av_crown:'👑', av_ninja:'🥷', av_robot:'🤖', av_dragon:'🐉', av_diamond:'💎', av_lightning:'⚡', av_wizard:'🧙', av_astronaut:'🧑‍🚀', av_galaxy:'🌌', av_phantom:'👻', av_tiger:'🐯' };
-                  shopEmoji = emojiMap2[appCos.equipped_avatar] || null;
-                }
+              const shopKey = 'sscai_u:' + uid2 + ':shop_owned';
+              const shopData = JSON.parse(localStorage.getItem(shopKey) || '{"owned":[],"equipped":{}}');
+              const equippedAvatarId = shopData.equipped && shopData.equipped.avatars;
+              
+              if (equippedAvatarId) {
+                const emojiMap = { 
+                  'av_fire':'🔥', 'av_crown':'👑', 'av_brain':'🧠', 'av_star':'⭐', 
+                  'av_lightning':'⚡', 'av_shield':'🛡️', 'av_gem':'💎', 'av_rocket':'🚀', 
+                  'av_ninja':'🥷', 'av_robot':'🤖', 'av_dragon':'🐉', 'av_diamond':'💎', 
+                  'av_wizard':'🧙', 'av_astronaut':'🧑‍🚀', 'av_galaxy':'🌌', 'av_phantom':'👻', 'av_tiger':'🐯' 
+                };
+                shopEmoji = emojiMap[equippedAvatarId] || null;
               }
             } catch(ex) {}
           }
