@@ -904,7 +904,7 @@ async function _generateQuizQuestions(exam, count, type) {
         ans: 0, topic: 'General', exp: 'Please ensure questions are uploaded to Firebase Storage.'
       }));
     },
-    async start(exam, count=40) {
+    async start(exam, count=10) {
       this._state = {
         exam, questions: [],
         current: 0, answers: {}, startTime: Date.now(),
@@ -1244,6 +1244,10 @@ async function _generateQuizQuestions(exam, count, type) {
       if (!body || !r) return;
       const p = r.prediction;
       XP.add(r.correct * 10);
+      // Update profile UI to show new XP
+      if (typeof updateProfileUI === 'function') {
+        setTimeout(updateProfileUI, 100);
+      }
       body.innerHTML = `
         <div class="cf-results-header">
           <div style="font-size:48px">${r.correct>=r.total*0.7?'🏆':r.correct>=r.total*0.5?'🎯':'📚'}</div>
